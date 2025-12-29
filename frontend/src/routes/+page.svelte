@@ -1866,6 +1866,10 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 					</div>
 					
 					<div class="space-y-6">
+						<p class="text-base font-semibold text-gray-700 dark:text-gray-200">
+							botchat never retains your chats or attachments.
+						</p>
+						
 						<button
 							on:click={() => (signInOpen = true)}
 							class="w-full py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-lg transition-colors text-lg"
@@ -1873,17 +1877,12 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 							Sign in to get started
 						</button>
 						
-						<div class="space-y-3">
-							<p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-								Sign in with Google or GitHub to try out botchat. Your AI bots and API keys are stored securely on your device.
-							</p>
-							<p class="text-sm text-gray-500 dark:text-gray-400">
-								botchat never retains your conversations or attachments.
-							</p>
-						</div>
-						
-						<p class="text-xs text-gray-400 dark:text-gray-500 pt-2">
+						<p class="text-xs text-gray-400 dark:text-gray-500">
 							By signing in, you agree to our <a href="/terms" class="underline hover:text-gray-600 dark:hover:text-gray-300">Terms of Service</a>.
+						</p>
+						
+						<p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+							Sign in with Google or GitHub to try out botchat.
 						</p>
 					</div>
 					

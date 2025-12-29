@@ -4,7 +4,7 @@
 </script>
 
 <svelte:head>
-	<title>botchat | minds > memory</title>
+	<title>botchat | many minds, no memory</title>
 	<link rel="icon" type="image/x-icon" href="/favicon.ico" />
 </svelte:head>
 
