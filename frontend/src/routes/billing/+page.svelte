@@ -196,7 +196,7 @@
 </script>
 
 <svelte:head>
-	<title>Billing | botchat | minds > memory</title>
+	<title>Billing | botchat | many minds, no memory</title>
 </svelte:head>
 
 <div class="min-h-screen bg-gray-50 dark:bg-gray-900">

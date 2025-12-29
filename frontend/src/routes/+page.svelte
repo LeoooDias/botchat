@@ -1828,7 +1828,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 </script>
 
 <svelte:head>
-	<title>botchat | minds > memory</title>
+	<title>botchat | many minds, no memory</title>
 </svelte:head>
 
 {#if $authLoading}
