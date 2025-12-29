@@ -1,0 +1,13 @@
+# Virtual environment (will be installed fresh in Docker)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Environment files (use Docker environment variables)
+.env
+.env.local
+
+# Test files
+test_*.sh
+*.test.py

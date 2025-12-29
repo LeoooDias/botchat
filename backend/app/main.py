@@ -1,0 +1,1098 @@
+from __future__ import annotations
+
+import asyncio
+import io
+import json
+import logging
+import os
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+import secrets
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from starlette.responses import StreamingResponse
+from msgmodel import stream, stream_panels, OpenAIConfig, GeminiConfig, AnthropicConfig
+from msgmodel.providers import OpenAIProvider, GeminiProvider, AnthropicProvider
+from pypdf import PdfReader
+
+# Key management
+from app.key_storage import (
+    get_configured_providers,
+    save_key,
+    delete_key,
+    get_provider_key_for_use,
+    SUPPORTED_PROVIDERS
+)
+from app.key_verification import verify_provider_key
+
+# Authentication
+from app.auth import (
+    OAuthCallbackRequest,
+    AuthResponse,
+    UserInfo,
+    exchange_oauth_code,
+    create_jwt,
+    require_auth,
+    get_current_user,
+    get_github_auth_url,
+    get_google_auth_url,
+    REQUIRE_AUTH,
+)
+
+# Database
+from app.database import (
+    init_db,
+    close_db,
+    create_user,
+    get_user_quota,
+    increment_quota,
+    FREE_TIER_QUOTA,
+    PAID_TIER_QUOTA,
+)
+
+# Billing
+from app.billing import router as billing_router
+
+# -----------------------------
+# Logging Configuration
+# -----------------------------
+# Set LOG_LEVEL environment variable to control verbosity
+# Production: LOG_LEVEL=WARNING (or ERROR)
+# Development: LOG_LEVEL=DEBUG
+log_level_env = os.environ.get("LOG_LEVEL", "WARNING").upper()
+allow_debug_logs = os.environ.get("ALLOW_DEBUG_LOGS", "false").lower() == "true"
+allowed_levels = {"CRITICAL", "ERROR", "WARNING", "INFO"}
+
+# Clamp log level to privacy-safe defaults; DEBUG requires explicit opt-in
+if log_level_env == "DEBUG" and not allow_debug_logs:
+    log_level_env = "INFO"
+elif log_level_env not in allowed_levels:
+    log_level_env = "WARNING"
+
+logging.basicConfig(
+    level=getattr(logging, log_level_env, logging.WARNING),
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+# Suppress access logs by default to avoid leaking paths/query params
+if os.environ.get("DISABLE_ACCESS_LOGS", "true").lower() == "true":
+    logging.getLogger("uvicorn.access").disabled = True
+
+# API key configuration (mandatory by default)
+API_KEY = os.environ.get("API_KEY", "")
+REQUIRE_API_KEY = os.environ.get("REQUIRE_API_KEY", "true").lower() != "false"
+API_KEY_HEADER = "x-api-key"
+
+if REQUIRE_API_KEY and not API_KEY:
+    raise RuntimeError("API_KEY must be set when REQUIRE_API_KEY is enabled (default)")
+
+# -----------------------------
+# Platform API Keys (for quota-based usage)
+# -----------------------------
+# These are botchat's own API keys used for users without BYOK
+# Keys are stored in GCP Secret Manager and injected as env vars at deploy time
+PLATFORM_OPENAI_KEY = os.environ.get("PLATFORM_OPENAI_API_KEY", "")
+PLATFORM_GEMINI_KEY = os.environ.get("PLATFORM_GEMINI_API_KEY", "")
+PLATFORM_ANTHROPIC_KEY = os.environ.get("PLATFORM_ANTHROPIC_API_KEY", "")
+
+PLATFORM_KEYS = {
+    "openai": PLATFORM_OPENAI_KEY,
+    "gemini": PLATFORM_GEMINI_KEY,
+    "anthropic": PLATFORM_ANTHROPIC_KEY,
+}
+
+
+def get_platform_key(provider: str) -> Optional[str]:
+    """Get platform API key for a provider if available."""
+    return PLATFORM_KEYS.get(provider.lower()) or None
+
+
+def has_platform_key(provider: str) -> bool:
+    """Check if platform has a key configured for this provider."""
+    return bool(get_platform_key(provider))
+
+
+# -----------------------------
+# PDF Text Extraction Utilities
+# -----------------------------
+
+def extract_pdf_text(file_bytes: bytes) -> str:
+    """Extract text from PDF file.
+    
+    Returns extracted text, or empty string if extraction fails.
+    Note: This may return empty string for scanned/image-based PDFs.
+    """
+    try:
+        pdf_file = io.BytesIO(file_bytes)
+        reader = PdfReader(pdf_file)
+        text_parts = []
+        
+        for page_num, page in enumerate(reader.pages):
+            try:
+                text = page.extract_text()
+                if text and text.strip():  # Only add if text is non-empty after stripping
+                    # Add page indicator for clarity
+                    text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
+            except Exception as page_error:
+                logger.warning("Failed to extract text from page %d: %s", page_num + 1, str(page_error))
+                continue
+        
+        extracted = "\n\n".join(text_parts)
+        return extracted
+    except Exception as e:
+        logger.warning("PDF text extraction failed: %s", str(e))
+        return ""
+
+
+def prepare_file_for_provider(
+    file_bytes: bytes, 
+    filename: str, 
+    provider: str
+) -> Tuple[Optional[io.BytesIO], Optional[str], Optional[str]]:
+    """Prepare file for submission to specific provider.
+    
+    Returns (file_like, filename, extracted_text_for_message)
+    
+    For PDF files:
+    - Gemini: Returns original PDF (native support)
+    - OpenAI: Extracts text and returns it as a text attachment metadata
+              If extraction fails, includes a warning message about the PDF
+    
+    For non-PDF: Returns original file for all providers
+    """
+    is_pdf = filename.lower().endswith('.pdf')
+    
+    if not is_pdf:
+        # Non-PDF files: pass through unchanged
+        file_like = io.BytesIO(file_bytes)
+        file_like.seek(0)
+        return file_like, filename, None
+    
+    # PDF handling
+    if provider.lower() == "gemini":
+        # Gemini supports PDFs natively
+        file_like = io.BytesIO(file_bytes)
+        file_like.seek(0)
+        return file_like, filename, None
+    elif provider.lower() in ("openai", "anthropic"):
+        # OpenAI and Anthropic: Extract text from PDF
+        # Neither supports native PDF - Anthropic has strict request size limits
+        extracted_text = extract_pdf_text(file_bytes)
+        if extracted_text and extracted_text.strip():
+            logger.debug("PDF text extracted from %s: %d chars", filename, len(extracted_text))
+            # Return None for file_like since we're using text instead
+            return None, None, extracted_text
+        else:
+            # PDF extraction failed or returned empty content
+            # This typically happens with scanned/image-based PDFs
+            warning_msg = f"[PDF Error] Could not extract text from '{filename}'. This is typically because the PDF contains scanned images or OCR-protected content. Please provide a text-based PDF or paste the content as text."
+            logger.warning("%s", warning_msg)
+            return None, None, warning_msg
+    else:
+        # Other providers: return original PDF
+        file_like = io.BytesIO(file_bytes)
+        file_like.seek(0)
+        return file_like, filename, None
+
+
+def get_privacy_info(provider: str) -> Optional[Dict[str, Any]]:
+    """Get privacy metadata for a provider.
+    
+    Returns privacy info dict or None if provider is unknown.
+    """
+    provider_lower = provider.lower()
+    
+    try:
+        if provider_lower == "openai":
+            return OpenAIProvider.get_privacy_info()
+        elif provider_lower == "gemini":
+            return GeminiProvider.get_privacy_info()
+        elif provider_lower == "anthropic":
+            return AnthropicProvider.get_privacy_info()
+        else:
+            logger.warning("Unknown provider for privacy info: %s", provider)
+            return None
+    except Exception as e:
+        logger.error("Failed to fetch privacy info for %s: %s", provider, str(e))
+        return None
+
+# -----------------------------
+# Models
+# -----------------------------
+
+class ModelConfig(BaseModel):
+    id: str  # client-side id; stable key for UI panel
+    provider: str
+    model: str
+    system: str = ""
+    max_tokens: Optional[int] = None  # Optional per-persona token limit
+    provider_key: Optional[str] = None  # Client-provided API key (decrypted from localStorage)
+
+
+class RunCreateRequest(BaseModel):
+    message: str
+    configs: List[ModelConfig]
+    max_parallel: int = 10
+
+
+class RunCreateResponse(BaseModel):
+    run_id: str
+
+
+class SynthesizeRequest(BaseModel):
+    system: str = "You synthesize multiple model answers into one best answer."
+    instruction: str = "Synthesize the answers."
+    include_config_ids: Optional[List[str]] = None
+
+
+# Settings Models
+class SaveKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+class VerifyKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+# -----------------------------
+# In-memory run state (dev-only)
+# -----------------------------
+
+@dataclass
+class RunState:
+    run_id: str
+    created_at: float
+    queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    finals: Dict[str, str] = field(default_factory=dict)  # config_id -> final text
+    done: bool = False
+    # Quota tracking for platform key usage
+    user_info: Optional[UserInfo] = None  # User context for quota updates
+    platform_key_configs: List[str] = field(default_factory=list)  # config_ids using platform keys
+    successful_platform_configs: List[str] = field(default_factory=list)  # track successes for quota
+
+
+RUNS: Dict[str, RunState] = {}
+RUNS_LOCK = asyncio.Lock()
+
+# Privacy: Auto-cleanup stale runs to prevent memory accumulation of sensitive data
+RUN_TTL_SECONDS = max(10, int(os.environ.get("RUN_TTL_SECONDS", "60")))
+
+
+async def require_api_key_or_jwt(
+    x_api_key: Optional[str] = Header(None, alias=API_KEY_HEADER),
+    authorization: Optional[str] = Header(None),
+) -> Optional[UserInfo]:
+    """Enforce authentication via API key OR JWT token.
+    
+    Supports both legacy API key auth and new JWT auth:
+    - x-api-key header: Legacy static key (for dev/self-hosted)
+    - Authorization: Bearer <token>: JWT from OAuth flow
+    
+    Returns UserInfo if JWT auth, None if API key auth.
+    """
+    # If auth is disabled entirely, allow through
+    if not REQUIRE_API_KEY and not REQUIRE_AUTH:
+        return None
+    
+    # Try JWT first (new auth flow)
+    if authorization and authorization.startswith("Bearer "):
+        from app.auth import verify_jwt
+        token = authorization[7:]
+        return verify_jwt(token)
+    
+    # Fall back to API key (legacy/self-hosted)
+    if REQUIRE_API_KEY:
+        if x_api_key and API_KEY and secrets.compare_digest(x_api_key, API_KEY):
+            return None  # API key valid, no user info
+        
+    # If we got here with REQUIRE_AUTH enabled, we need a valid JWT
+    if REQUIRE_AUTH:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # REQUIRE_API_KEY is true but key is invalid
+    if REQUIRE_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    return None
+
+
+# Alias for backward compatibility
+async def require_api_key(
+    x_api_key: Optional[str] = Header(None, alias=API_KEY_HEADER),
+    authorization: Optional[str] = Header(None),
+) -> None:
+    """Legacy wrapper - now supports both API key and JWT."""
+    await require_api_key_or_jwt(x_api_key, authorization)
+
+
+async def cleanup_stale_runs() -> None:
+    """Remove completed runs older than TTL to prevent memory accumulation."""
+    while True:
+        await asyncio.sleep(60)  # Check every minute
+        now = time.time()
+        async with RUNS_LOCK:
+            stale_ids = [
+                run_id for run_id, run in RUNS.items()
+                if run.done and (now - run.created_at) > RUN_TTL_SECONDS
+            ]
+            for run_id in stale_ids:
+                del RUNS[run_id]
+                logger.debug("Cleaned up stale run: %s", run_id)
+
+
+# -----------------------------
+# FastAPI setup
+# -----------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan context manager.
+    
+    Handles startup and shutdown events.
+    Replaces deprecated @app.on_event("startup") pattern.
+    """
+    # Startup
+    await init_db()  # Initialize database connection
+    asyncio.create_task(cleanup_stale_runs())
+    yield
+    # Shutdown
+    await close_db()  # Close database connection
+
+
+app = FastAPI(title="botchat-backend", lifespan=lifespan)
+
+# Include billing routes
+app.include_router(billing_router)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker and monitoring."""
+    return {"status": "healthy", "service": "botchat-backend"}
+
+
+# CORS Configuration
+# Set CORS_ORIGINS environment variable for production (comma-separated)
+# Example: CORS_ORIGINS=https://myapp.example.com,https://app.example.com
+# Default includes development origins plus production Cloud Run and custom domain
+default_cors = "http://localhost:3000,http://localhost:3001,http://localhost:5173,https://botchat-frontend-887036129720.us-central1.run.app,https://dev.botchat.ca"
+cors_origins_env = os.environ.get("CORS_ORIGINS", default_cors)
+
+if "*" in cors_origins_env:
+    raise RuntimeError("CORS_ORIGINS must not contain '*' to maintain origin pinning")
+
+cors_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
+if not cors_origins:
+    raise RuntimeError("CORS_ORIGINS must specify at least one allowed origin")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,  # Allow cookies/auth for OAuth flow
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["Content-Type", API_KEY_HEADER, "Authorization", "Accept", "Origin"],
+    expose_headers=["Content-Type"],
+    max_age=3600,  # Cache preflight for 1 hour
+)
+
+
+# -----------------------------
+# SSE helpers
+# -----------------------------
+
+def sse(event: str, data: Any) -> str:
+    # EventSource expects lines: "event: X\n" + "data: ...\n\n"
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+async def publish(run: RunState, event: str, data: Any) -> None:
+    await run.queue.put(sse(event, data))
+
+
+# -----------------------------
+# Fake "LLM" streaming (replace with msgmodel)
+# -----------------------------
+
+async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, file_like: Optional[io.BytesIO] = None, filename: Optional[str] = None, extracted_text: Optional[str] = None) -> None:
+    """Stream one provider's response to a message (optionally with attachment).
+    
+    msgmodel v4.0.1 uses in-memory BytesIO for all file uploads, eliminating:
+    - Server-side file persistence (privacy-first)
+    - OpenAI Files API cleanup complexity
+    - Stateful file management
+    
+    For PDFs with OpenAI: extracted_text contains the PDF text content, used instead of file_like.
+    
+    Privacy metadata is fetched and sent to the frontend for transparency.
+    Each request is completely independent and stateless.
+    """
+    await publish(run, "panel_start", {"config_id": cfg.id})
+
+    config_obj = build_config(cfg)
+    
+    # Fetch and send privacy metadata for this provider
+    privacy_info = get_privacy_info(cfg.provider)
+    await publish(run, "panel_privacy", {
+        "config_id": cfg.id,
+        "privacy": privacy_info
+    })
+
+    loop = asyncio.get_running_loop()
+    final_parts: list[str] = []
+
+    def _run_in_thread():
+        # msgmodel.stream(provider, message, config, system_instruction, file_like, filename)
+        # 
+        # v3.2.0+ ARCHITECTURE:
+        # - file_like: Optional[io.BytesIO] - in-memory file wrapped in BytesIO (never uploaded to server)
+        # - filename: str - REQUIRED when file_like present, used for MIME type detection
+        # - No file cleanup needed; BytesIO is garbage collected automatically
+        # - No Files API calls; base64 inline encoding handled internally by msgmodel
+        # 
+        # PDF HANDLING:
+        # - For OpenAI: extracted_text contains PDF text, prepended to message
+        # - For Gemini: file_like contains original PDF for native support
+        #
+        # STREAMING WITH RETRY (v3.3.0+ Support):
+        # - Retries on rate limits (429) with exponential backoff
+        # - Raises StreamingError on empty responses (will be caught below)
+        # - Raises APIError for other API failures
+        
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            try:
+                stream_kwargs = {"config": config_obj}
+                if cfg.system:
+                    stream_kwargs["system_instruction"] = cfg.system
+                
+                # CRITICAL: Set max_tokens with smart defaults
+                # Without this, OpenAI defaults are too low for multi-turn conversations.
+                # finish_reason: "length" means token limit was hit mid-response.
+                # Default to 4000 tokens for better multi-turn conversation support
+                max_tokens_to_use = cfg.max_tokens or 4000  # Default to 4000 if not specified
+                stream_kwargs["max_tokens"] = max_tokens_to_use
+                logger.debug("max_tokens set to %d for %s %s", max_tokens_to_use, cfg.provider, cfg.model)
+                                # If we have extracted text (multiple files, or PDFs for OpenAI), prepend it to the message
+                effective_message = message
+                if extracted_text:
+                    # Format extracted text with clear separation
+                    effective_message = f"{extracted_text}\n\n---\n\n[User Query]\n{message}"
+                    logger.debug("Using extracted text (%d chars) for %s", len(extracted_text), cfg.provider)
+                
+                if file_like:
+                    # PRIVACY GUARANTEE: Files never uploaded to provider servers.
+                    # Instead, base64 inline encoding is used (handled by msgmodel internally).
+                    file_like.seek(0)  # Ensure we're at the start
+                    stream_kwargs["file_like"] = file_like
+                    if filename:
+                        # Filename is essential for MIME type detection.
+                        # msgmodel uses this to set Content-Type on base64-encoded data.
+                        stream_kwargs["filename"] = filename
+                    logger.debug("File passed to stream: filename=%s, size=%d bytes", filename, len(file_like.getvalue()))
+                
+                logger.debug("Calling stream with provider=%s, kwargs=%s (attempt %d/%d)", 
+                           cfg.provider.lower(), list(stream_kwargs.keys()), retry_count + 1, max_retries + 1)
+                
+                final_parts.clear()  # Clear previous attempt if retrying
+                for chunk in stream(cfg.provider.lower(), effective_message, **stream_kwargs):
+                    final_parts.append(chunk)
+                    # Push token to the SSE queue on the event loop thread
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                    )
+                final = "".join(final_parts).strip()
+                run.finals[cfg.id] = final
+                
+                # Track successful platform key usage for quota increment
+                if cfg.id in run.platform_key_configs:
+                    run.successful_platform_configs.append(cfg.id)
+                
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_final", {"config_id": cfg.id, "final": final}),
+                )
+                return  # Success - exit retry loop
+                
+            except Exception as e:
+                error_type = type(e).__name__
+                error_msg = str(e)
+                
+                # Handle StreamingError from msgmodel (empty response)
+                # ROOT CAUSE: This typically occurs when:
+                # 1. max_tokens is set too low (model finishes before generating content)
+                # 2. System prompt + user message is very long (consumes available tokens)
+                # 3. Model hits output token limit immediately (finish_reason: "length")
+                # SOLUTION: Validate max_tokens >= 100, or let msgmodel handle defaults
+                if error_type == "StreamingError":
+                    # This typically means the model finished without generating content
+                    # Often due to hitting token limits or other edge cases
+                    user_friendly_msg = "Model ran out of tokens. With 3+ parallel responses, token limits can be tight. Try: (1) Shorter prompts, (2) Clearing old messages, or (3) Increasing max_tokens in bot settings."
+                    logger.warning("StreamingError from %s: %s | max_tokens was %d", cfg.provider, error_msg, max_tokens_to_use)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_error", {"config_id": cfg.id, "error": user_friendly_msg}),
+                    )
+                    return
+                
+                # Check for rate limit errors (msgmodel v3.3.0+)
+                is_rate_limit = (
+                    error_type == "RateLimitError" or
+                    (error_type == "APIError" and "rate" in error_msg.lower()) or
+                    (error_type == "APIError" and "429" in error_msg)
+                )
+                
+                if is_rate_limit and retry_count < max_retries:
+                    # Exponential backoff: 2^retry_count (1s, 2s, 4s)
+                    wait_time = 2 ** retry_count
+                    retry_count += 1
+                    logger.warning("Rate limited on %s. Retrying in %ds (attempt %d/%d). Error: %s",
+                                 cfg.provider, wait_time, retry_count, max_retries, error_msg)
+                    time.sleep(wait_time)
+                    continue  # Retry
+                
+                # Not retryable or max retries exceeded
+                full_error_msg = f"{error_type}: {error_msg}"
+                if retry_count > 0 and is_rate_limit:
+                    full_error_msg = f"Rate limited after {retry_count} retries: {error_msg}"
+                
+                logger.error("Exception in stream(): %s", full_error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": full_error_msg}),
+                )
+                return  # Exit on non-retryable error
+
+    try:
+        await asyncio.to_thread(_run_in_thread)
+        final = run.finals.get(cfg.id, "")
+        if not final:  # Only publish if not already published in _run_in_thread
+            await publish(run, "panel_final", {"config_id": cfg.id, "final": final})
+    except Exception as e:
+        await publish(run, "panel_error", {"config_id": cfg.id, "error": str(e)})
+
+
+async def run_fanout(run: RunState, configs: List[ModelConfig], message: str, max_parallel: int, file_list: Optional[List[Tuple[bytes, str]]] = None) -> None:
+    try:
+        await publish(run, "run_start", {"run_id": run.run_id, "n": len(configs)})
+
+        # Limit concurrency
+        sem = asyncio.Semaphore(max_parallel)
+
+        async def guarded(cfg: ModelConfig):
+            async with sem:
+                # For multiple files: extract text from all and send as text
+                # For single file: use native format when possible
+                file_like = None
+                file_name = None
+                extracted_text = None
+                
+                if file_list:
+                    if len(file_list) > 1:
+                        # Multiple files: Extract text from all files and combine
+                        # This ensures all files are visible to the provider
+                        logger.debug("Multiple files detected (%d), extracting text from all", len(file_list))
+                        all_texts = []
+                        for file_bytes, filename in file_list:
+                            is_pdf = filename.lower().endswith('.pdf')
+                            if is_pdf:
+                                # Extract text from PDF
+                                pdf_text = extract_pdf_text(file_bytes)
+                                if pdf_text and pdf_text.strip():
+                                    all_texts.append(f"\n[File: {filename}]\n{pdf_text}")
+                                else:
+                                    all_texts.append(f"\n[File: {filename}] (Failed to extract text - may be scanned/image PDF)")
+                            else:
+                                # For non-PDF files, read as text
+                                try:
+                                    text = file_bytes.decode('utf-8', errors='replace')
+                                    all_texts.append(f"\n[File: {filename}]\n{text}")
+                                except Exception as e:
+                                    all_texts.append(f"\n[File: {filename}] (Could not read file: {str(e)})")
+                        
+                        if all_texts:
+                            extracted_text = "".join(all_texts)
+                            logger.debug("Combined text from %d files: %d chars", len(file_list), len(extracted_text))
+                    else:
+                        # Single file: use prepare_file_for_provider for native format support
+                        file_bytes, filename = file_list[0]
+                        file_like, file_name, extracted_text = prepare_file_for_provider(
+                            file_bytes,
+                            filename,
+                            cfg.provider
+                        )
+                        logger.debug("Single file: %s, native_support=%s, extracted_text=%s", filename, file_like is not None, extracted_text is not None)
+                
+                await msgmodel_stream_one(run, cfg, message, file_like, file_name, extracted_text)
+
+        tasks = [asyncio.create_task(guarded(cfg)) for cfg in configs]
+        await asyncio.gather(*tasks)
+
+        # Increment quota BEFORE sending run_done so frontend sees updated quota
+        quota_updated = None
+        if run.user_info and run.successful_platform_configs:
+            success_count = len(run.successful_platform_configs)
+            try:
+                quota_updated = await increment_quota(
+                    run.user_info.provider,
+                    run.user_info.user_id,
+                    count=success_count
+                )
+                if quota_updated:
+                    logger.debug(
+                        "Quota incremented: user=%s:%s, count=%d, new_used=%d/%d",
+                        run.user_info.provider,
+                        run.user_info.user_id,
+                        success_count,
+                        quota_updated["used"],
+                        quota_updated["limit"]
+                    )
+            except Exception as e:
+                logger.error("Failed to increment quota: %s", str(e))
+
+        # Include quota info in run_done event for immediate UI update
+        run_done_data = {"run_id": run.run_id}
+        if quota_updated:
+            run_done_data["quota"] = quota_updated
+        await publish(run, "run_done", run_done_data)
+    except Exception as e:
+        await publish(run, "run_error", {"run_id": run.run_id, "error": str(e)})
+    finally:
+        run.done = True
+
+
+async def fake_synthesize(run: RunState, synth_req: SynthesizeRequest) -> None:
+    # Very simple fake synth for now
+    include = synth_req.include_config_ids or list(run.finals.keys())
+    parts = [run.finals[cid] for cid in include if cid in run.finals]
+
+    await publish(run, "synth_start", {"include": include})
+
+    # Stream a pretend synthesis
+    combined = " / ".join(parts)
+    words = (synth_req.instruction + " " + combined).split(" ")
+    buf = []
+    for w in words:
+        buf.append(w)
+        await publish(run, "synth_token", {"token": w + " "})
+        await asyncio.sleep(0.02)
+
+    await publish(run, "synth_final", {"final": "".join(buf).strip()})
+
+
+# -----------------------------
+# Routes: Authentication
+# -----------------------------
+
+class AuthUrlRequest(BaseModel):
+    """Request for OAuth authorization URL."""
+    provider: str  # "github" or "google"
+    redirect_uri: str
+
+
+class AuthUrlResponse(BaseModel):
+    """OAuth authorization URL response."""
+    url: str
+
+
+@app.post("/auth/url", response_model=AuthUrlResponse)
+async def get_auth_url(req: AuthUrlRequest):
+    """Get OAuth authorization URL for a provider.
+    
+    Frontend redirects user to this URL to start OAuth flow.
+    """
+    if req.provider == "github":
+        url = get_github_auth_url(req.redirect_uri)
+    elif req.provider == "google":
+        url = get_google_auth_url(req.redirect_uri)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
+    
+    return AuthUrlResponse(url=url)
+
+
+@app.post("/auth/callback", response_model=AuthResponse)
+async def auth_callback(req: OAuthCallbackRequest):
+    """Exchange OAuth code for JWT.
+    
+    Called by frontend after user completes OAuth flow.
+    Creates/links user account by email and returns JWT token.
+    
+    Email linking: If a user with the same email already exists (from a
+    different OAuth provider), they are linked to the same account. This
+    ensures subscriptions work across login methods.
+    """
+    # Get user info from OAuth provider
+    user = await exchange_oauth_code(req)
+    
+    # Create or link user account in database (links by email if exists)
+    try:
+        db_user = await create_user(
+            provider=user.provider,
+            oauth_id=user.user_id,
+            email=user.email,
+        )
+        logger.info("User authenticated: %s (db_id=%s)", user.email, db_user.get('id'))
+    except Exception as e:
+        # Log but don't fail - user can still authenticate
+        logger.warning("Failed to persist user to database: %s", str(e))
+    
+    token, expires_at = create_jwt(user)
+    
+    return AuthResponse(
+        token=token,
+        user={
+            "provider": user.provider,
+            "id": user.user_id,
+            "email": user.email,
+            "name": user.name,
+            "avatar": user.avatar_url,
+        },
+        expires_at=expires_at,
+    )
+
+
+@app.get("/auth/me")
+async def get_current_user_info(user: UserInfo = Depends(require_auth)):
+    """Get current authenticated user info.
+    
+    Useful for validating token and displaying user profile.
+    """
+    return {
+        "provider": user.provider,
+        "id": user.user_id,
+        "email": user.email,
+        "name": user.name,
+        "avatar": user.avatar_url,
+    }
+
+
+@app.get("/auth/encryption-key")
+async def get_encryption_key(user: UserInfo = Depends(require_auth)):
+    """Get the user's encryption key for client-side API key encryption.
+    
+    This key is used to encrypt/decrypt AI provider API keys in localStorage.
+    The actual API keys never touch the server - only the encryption key.
+    """
+    from app.database import get_user_by_oauth, get_user_by_email
+    
+    # Get user from database
+    db_user = await get_user_by_oauth(user.provider, user.user_id)
+    
+    # If not found by OAuth, try by email (for linked accounts)
+    if not db_user and user.email:
+        db_user = await get_user_by_email(user.email)
+    
+    if not db_user or not db_user.get('encryption_key'):
+        raise HTTPException(status_code=404, detail="User encryption key not found")
+    
+    return {
+        "encryption_key": db_user['encryption_key']
+    }
+
+
+@app.get("/auth/quota")
+async def get_quota(user: UserInfo = Depends(require_auth)):
+    """Get user's message quota status.
+    
+    Returns:
+    - used: messages used this period
+    - limit: total allowed for this period (100 free, 5000 paid)
+    - remaining: messages remaining
+    - period_ends_at: when current period ends
+    - is_paid: whether user has paid subscription
+    """
+    quota = await get_user_quota(user.provider, user.user_id, user.email)
+    return quota
+
+
+# -----------------------------
+# Routes: Settings (API Key Management)
+# -----------------------------
+
+@app.get("/settings/providers")
+async def get_providers(api_key=Depends(require_api_key)):
+    """Get list of supported providers and their configuration status."""
+    return get_configured_providers(API_KEY)
+
+
+@app.post("/settings/keys/verify")
+async def verify_key(req: VerifyKeyRequest, api_key=Depends(require_api_key)):
+    """Verify an API key is valid without saving it."""
+    if req.provider.lower() not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
+    
+    is_valid, message, details = await verify_provider_key(req.provider, req.api_key)
+    return {
+        "valid": is_valid,
+        "message": message,
+        "details": details
+    }
+
+
+@app.post("/settings/keys")
+async def save_provider_key(req: SaveKeyRequest, api_key=Depends(require_api_key)):
+    """Save a provider API key (encrypted storage)."""
+    if req.provider.lower() not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
+    
+    # Optionally verify before saving
+    is_valid, message, _ = await verify_provider_key(req.provider, req.api_key)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid API key: {message}")
+    
+    save_key(API_KEY, req.provider, req.api_key)
+    return {"ok": True, "message": f"{req.provider} key saved successfully"}
+
+
+@app.delete("/settings/keys/{provider}")
+async def delete_provider_key(provider: str, api_key=Depends(require_api_key)):
+    """Delete a stored provider API key."""
+    if provider.lower() not in SUPPORTED_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    
+    deleted = delete_key(API_KEY, provider)
+    if deleted:
+        return {"ok": True, "message": f"{provider} key deleted"}
+    else:
+        return {"ok": False, "message": f"No key found for {provider}"}
+
+
+# -----------------------------
+# Routes: Chat
+# -----------------------------
+
+# Privacy & Security: Request size limits
+MAX_MESSAGE_LENGTH = 100_000  # ~100KB text limit
+
+
+@app.post("/runs", response_model=RunCreateResponse)
+async def create_run(
+    message: str = Form(...),
+    configs: str = Form(...),  # JSON string
+    max_parallel: int = Form(10),
+    attachments: List[UploadFile] = File(default=[]),
+    user: Optional[UserInfo] = Depends(require_api_key_or_jwt)
+) -> RunCreateResponse:
+    # Input validation: message length
+    if len(message) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Message exceeds {MAX_MESSAGE_LENGTH} character limit")
+    
+    
+    # Parse configs JSON
+    try:
+        config_list = json.loads(configs)
+        config_objs = [ModelConfig(**cfg) for cfg in config_list]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid configs JSON: {str(e)}")
+
+    if not config_objs or len(config_objs) > 10:
+        raise HTTPException(status_code=400, detail="configs must be 1..10 items")
+
+    # -----------------------------
+    # Quota & Platform Key Handling
+    # -----------------------------
+    # Determine which bots use BYOK vs platform keys
+    # - BYOK: User provides their own API key (no quota usage)
+    # - Platform: Uses botchat's API key (counts against quota)
+    platform_key_config_ids: List[str] = []
+    
+    for cfg in config_objs:
+        has_byok = bool(cfg.provider_key)  # User provided their own key
+        
+        if not has_byok:
+            # Check if platform has a key for this provider
+            platform_key = get_platform_key(cfg.provider)
+            if platform_key:
+                # Inject platform key into config
+                cfg.provider_key = platform_key
+                platform_key_config_ids.append(cfg.id)
+            else:
+                # No BYOK and no platform key - try server env fallback
+                # This maintains backward compatibility with existing deployments
+                pass
+    
+    # Check quota if using any platform keys
+    if platform_key_config_ids and user:
+        quota = await get_user_quota(user.provider, user.user_id, user.email)
+        
+        # Count how many messages will use platform keys
+        platform_message_count = len(platform_key_config_ids)
+        
+        if quota["remaining"] < platform_message_count:
+            # Quota exceeded
+            if quota["remaining"] == 0:
+                raise HTTPException(
+                    status_code=429, 
+                    detail=f"Message quota exhausted. Used {quota['used']}/{quota['limit']} messages this period. "
+                           f"Upgrade to paid for {PAID_TIER_QUOTA} messages/month, or add your own API keys in Settings > Advanced."
+                )
+            else:
+                # Partial quota - let user know some bots won't work
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Insufficient quota. You have {quota['remaining']} messages remaining but selected {platform_message_count} bots using platform keys. "
+                           f"Use fewer bots or add your own API keys in Settings > Advanced."
+                )
+    
+    # If no user and platform keys needed, require authentication
+    if platform_key_config_ids and not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required for platform API key usage. Sign in or provide your own API keys."
+        )
+
+    # MSGMODEL v3.2.0: In-Memory File Handling with Multi-File Support
+    # Files are read into memory as bytes (not written to disk).
+    # This ensures:
+    # 1. Privacy: Files never touch the server filesystem
+    # 2. Stateless: No cleanup required; each request is independent
+    # 3. Smart: PDFs are intelligently handled per-provider
+    #    - Gemini: Native PDF support (file passed as-is)
+    #    - OpenAI: Text extraction (PDF converted to text)
+    file_list: List[Tuple[bytes, str]] = []
+    if attachments:
+        for attachment in attachments:
+            try:
+                file_bytes = await attachment.read()
+                filename = attachment.filename or "unknown"
+                
+                file_list.append((file_bytes, filename))
+                logger.debug("Attachment received: filename=%s, size=%d bytes", filename, len(file_bytes))
+                
+                # Log PDF detection
+                if filename.lower().endswith('.pdf'):
+                    logger.debug("PDF detected - will extract text for OpenAI, pass native PDF to Gemini")
+            except Exception as e:
+                logger.error("Failed to read attachment %s: %s", attachment.filename, str(e))
+                raise HTTPException(status_code=400, detail=f"Failed to read attachment: {str(e)}")
+    
+    if not file_list:
+        logger.debug("No attachments received")
+
+    run_id = str(uuid.uuid4())
+    run = RunState(
+        run_id=run_id,
+        created_at=time.time(),
+        user_info=user,
+        platform_key_configs=platform_key_config_ids,
+    )
+
+    async with RUNS_LOCK:
+        RUNS[run_id] = run
+
+    # Kick off background orchestration with file_list (will be processed per-provider)
+    asyncio.create_task(run_fanout(run, config_objs, message, max_parallel, file_list if file_list else None))
+
+    return RunCreateResponse(run_id=run_id)
+
+
+@app.get("/runs/{run_id}/events")
+async def stream_events(run_id: str, api_key=Depends(require_api_key)):
+    async with RUNS_LOCK:
+        run = RUNS.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    async def event_generator():
+        try:
+            # Initial hello (helps the UI know it connected)
+            yield sse("hello", {"run_id": run_id})
+
+            # Heartbeat so proxies don’t buffer/close
+            last_ping = time.time()
+
+            while True:
+                # If done and queue empty, close stream
+                if run.done and run.queue.empty():
+                    yield sse("goodbye", {"run_id": run_id})
+                    break
+
+                try:
+                    msg = await asyncio.wait_for(run.queue.get(), timeout=0.5)
+                    yield msg
+                except asyncio.TimeoutError:
+                    pass
+
+                if time.time() - last_ping > 10:
+                    last_ping = time.time()
+                    yield sse("ping", {"t": last_ping})
+        finally:
+            if run.done:
+                async with RUNS_LOCK:
+                    if RUNS.get(run_id) is run:
+                        RUNS.pop(run_id, None)
+                        logger.debug("Purged run %s after stream closed", run_id)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/runs/{run_id}/synthesize")
+async def synthesize(run_id: str, req: SynthesizeRequest, api_key=Depends(require_api_key)):
+    async with RUNS_LOCK:
+        run = RUNS.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    if not run.finals:
+        raise HTTPException(status_code=400, detail="no panel finals yet")
+
+    asyncio.create_task(fake_synthesize(run, req))
+    return {"ok": True}
+
+def build_config(cfg: ModelConfig):
+    """Build a msgmodel provider config from UI selection.
+    
+    MSGMODEL v3.2.8+ PROVIDER SUPPORT:
+    - OpenAI: Zero Data Retention enforced (non-negotiable)
+    - Gemini: Paid tier only (abuse detection retention ~24-72 hours)
+    
+    API Key Priority:
+    1. Client-provided key (decrypted from localStorage, sent with request)
+    2. Server environment variable (fallback for shared/demo mode)
+    
+    Client-provided keys are NEVER stored server-side - they exist only in memory
+    for the duration of the request.
+    """
+    p = cfg.provider.lower()
+    
+    # Priority 1: Client-provided key (from localStorage, decrypted client-side)
+    # Priority 2: Server environment variable (fallback)
+    provider_key = cfg.provider_key or get_provider_key_for_use(API_KEY, p)
+    
+    if p == "openai":
+        # OpenAI v3.2.0: X-OpenAI-No-Store header added automatically.
+        # ZDR guarantee: Request content NOT used for training or service improvement.
+        # Metadata (timestamps, tokens) may persist ~30 days for debugging only.
+        if provider_key:
+            return OpenAIConfig(model=cfg.model, api_key=provider_key)
+        return OpenAIConfig(model=cfg.model)
+    if p == "gemini":
+        # Gemini v3.2.0: Requires paid Cloud account with billing enabled.
+        # Free tier usage will retain data indefinitely for training (non-compliant).
+        # Paid tier: Data retained for abuse detection only (~24-72 hours).
+        if provider_key:
+            return GeminiConfig(model=cfg.model, api_key=provider_key)
+        return GeminiConfig(model=cfg.model)
+    if p == "anthropic":
+        # Anthropic: By default, user conversations are not used for training.
+        # Can optionally be logged for security purposes (opt-in).
+        # Enterprise plans available for zero data retention.
+        if provider_key:
+            return AnthropicConfig(model=cfg.model, api_key=provider_key)
+        return AnthropicConfig(model=cfg.model)
+    return None

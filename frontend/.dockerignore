@@ -1,0 +1,15 @@
+# Dependencies (will be installed fresh in Docker)
+node_modules/
+
+# Build output (will be built fresh in Docker)
+build/
+.svelte-kit/
+
+# Environment files (use Docker environment variables)
+.env
+.env.local
+.env.*.local
+
+# Dev/IDE files
+.vscode/
+*.log
