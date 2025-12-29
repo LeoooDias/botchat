@@ -72,11 +72,11 @@
 					<ol class="space-y-3 text-gray-700 dark:text-gray-300">
 						<li class="flex gap-3">
 							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">1</span>
-							<span><strong>Create bots</strong> — Use the Bot Library to create AI assistants with custom personalities and system instructions.</span>
+							<span><strong>Create bots</strong> — Use the Bot Library to create AI assistants with custom personalities and instructions.</span>
 						</li>
 						<li class="flex gap-3">
 							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">2</span>
-							<span><strong>Add bots to your chat</strong> — Click on saved bots to add them to your current conversation. Add multiple for parallel responses!</span>
+							<span><strong>Add bots to your chat</strong> — Click on the + button to add saved bots to your current chat. Add multiple for parallel responses!</span>
 						</li>
 						<li class="flex gap-3">
 							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">3</span>
