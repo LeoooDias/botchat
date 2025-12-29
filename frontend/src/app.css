@@ -121,6 +121,49 @@ body {
 
 /* ===== END MOBILE STYLES ===== */
 
+/* Instant tooltip on hover (no delay) */
+.instant-tooltip {
+  position: relative;
+}
+
+.instant-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: #1f2937;
+  color: white;
+  font-size: 11px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.1s ease, visibility 0.1s ease;
+  z-index: 100;
+  margin-bottom: 4px;
+}
+
+.dark .instant-tooltip::after {
+  background: #374151;
+}
+
+/* Desktop: show on hover immediately */
+@media (min-width: 768px) {
+  .instant-tooltip:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* Mobile: show when .tooltip-visible class is added */
+.instant-tooltip.tooltip-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
 /* Dark mode scrollbar */
 .dark ::-webkit-scrollbar {
   width: 8px;

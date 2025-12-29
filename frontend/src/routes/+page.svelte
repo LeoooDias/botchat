@@ -2267,8 +2267,8 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						<!-- Quota Label (rightmost) -->
 						{#if $isAuthenticated}
 							<span 
-								class="text-xs font-medium whitespace-nowrap flex items-center gap-1 {$isQuotaExhausted ? 'text-red-600 dark:text-red-400' : $quotaPercentage >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}"
-								title="Messages used this month"
+								class="text-xs font-medium whitespace-nowrap flex items-center gap-1 instant-tooltip {$isQuotaExhausted ? 'text-red-600 dark:text-red-400' : $quotaPercentage >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}"
+								data-tooltip="Messages used this month"
 							>
 								{$quota.used}/{$quota.limit}
 								{#if $isQuotaExhausted}

@@ -26,11 +26,26 @@
 	$: showSessionExpired = isAuthenticated && !isSessionValid;
 
 	let showChatMenu = false;
+	let quotaElement: HTMLButtonElement;
+	let tooltipTimeout: ReturnType<typeof setTimeout>;
 
 	function handleMenuAction(action: () => void, keepOpen = false) {
 		action();
 		if (!keepOpen) {
 			showChatMenu = false;
+		}
+	}
+
+	function toggleQuotaTooltip() {
+		if (quotaElement) {
+			// Clear any existing timeout
+			clearTimeout(tooltipTimeout);
+			// Show tooltip
+			quotaElement.classList.add('tooltip-visible');
+			// Hide after 2 seconds
+			tooltipTimeout = setTimeout(() => {
+				quotaElement.classList.remove('tooltip-visible');
+			}, 2000);
 		}
 	}
 </script>
@@ -74,12 +89,15 @@
 		<div class="flex items-center gap-1">
 			<!-- Quota indicator (compact for mobile) -->
 			{#if isAuthenticated}
-				<span 
-					class="px-1.5 py-0.5 text-[10px] font-medium rounded {isQuotaExhausted ? 'bg-red-500/30 text-red-200' : 'bg-white/10 text-blue-100'}"
-					title="Messages used: {quotaUsed}/{quotaLimit}"
+				<button 
+					type="button"
+					class="px-1.5 py-0.5 text-[10px] font-medium rounded instant-tooltip {isQuotaExhausted ? 'bg-red-500/30 text-red-200' : 'bg-white/10 text-blue-100'}"
+					data-tooltip="Messages used: {quotaUsed}/{quotaLimit}"
+					on:click={toggleQuotaTooltip}
+					bind:this={quotaElement}
 				>
 					{quotaUsed}/{quotaLimit}
-				</span>
+				</button>
 			{/if}
 			{#if isPaidUser}
 				<a
