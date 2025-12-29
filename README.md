@@ -113,3 +113,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## Author
+
+Leo Dias
