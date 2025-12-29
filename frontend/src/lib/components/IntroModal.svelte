@@ -58,8 +58,8 @@
 						<span class="text-xl">🤖</span> What makes botchat different?
 					</h3>
 					<p class="text-gray-700 dark:text-gray-300 leading-relaxed">
-						Chat with <strong>multiple AI models at once</strong>. Ask a question and get perspectives from 
-						OpenAI, Claude, and Gemini side-by-side. Compare responses, find the best answer, or see how 
+						Chat with <strong>multiple AI bots at once</strong>. Ask a question and get perspectives from 
+						OpenAI, Claude, and Gemini powered bots, side-by-side. Compare responses, find the best answers, or see how 
 						different AI personalities approach your problem.
 					</p>
 				</section>
@@ -71,19 +71,19 @@
 					</h3>
 					<ol class="space-y-3 text-gray-700 dark:text-gray-300">
 						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">2</span>
+							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">1</span>
 							<span><strong>Create bots</strong> — Use the Bot Library to create AI assistants with custom personalities and system instructions.</span>
 						</li>
 						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">3</span>
+							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">2</span>
 							<span><strong>Add bots to your chat</strong> — Click on saved bots to add them to your current conversation. Add multiple for parallel responses!</span>
 						</li>
 						<li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">4</span>
+							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">3</span>
 							<span><strong>Start chatting!</strong> — Type your message and all active bots will respond simultaneously.</span>
 						</li>
                         <li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">1</span>
+							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">4</span>
 							<span><strong>Add API keys</strong> — Go to Settings (⚙️) and add your API keys from OpenAI, Anthropic, or Google. Your keys are encrypted and stored only in your browser.</span>
 						</li>
 					</ol>
@@ -108,7 +108,7 @@
 						<span class="text-xl">💡</span> Pro tips
 					</h3>
 					<ul class="text-gray-700 dark:text-gray-300 space-y-2 text-sm">
-						<li>• <strong>Response mode modifiers:</strong> Toggle between Chat (brief) and Deep (comprehensive) modes using the built-in chat modifiers</li>
+						<li>• <strong>Response mode modifiers:</strong> Toggle between Chat (brief) and Deep (comprehensive) modes using the built-in chat</li>
 						<li>• <strong>Attachments:</strong> Upload PDFs, images, or text files for AI analysis</li>
 						<li>• <strong>Keyboard shortcut:</strong> Press <kbd class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">S</kbd> to toggle the sidebar</li>
 					</ul>
