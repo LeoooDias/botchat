@@ -1170,6 +1170,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		console.log('[BYOK] Encryption key available:', !!encryptionKey);
 		
 		// Create configs only for bots within limit, including decrypted provider keys
+		let platformKeyCount = 0; // Track bots using platform keys for optimistic quota update
 		const configs = await Promise.all(botsWithinLimit.map(async (bot) => {
 			let providerKey: string | null = null;
 			
@@ -1177,6 +1178,11 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			if (encryptionKey) {
 				providerKey = await getProviderKey(bot.provider, encryptionKey);
 				console.log(`[BYOK] Provider key for ${bot.provider}:`, providerKey ? 'found' : 'not found');
+			}
+			
+			// Count bots that will use platform keys (no BYOK)
+			if (!providerKey) {
+				platformKeyCount++;
 			}
 			
 			return {
@@ -1188,6 +1194,13 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				provider_key: providerKey // Will be null if not configured (backend falls back to env)
 			};
 		}));
+		
+		// Optimistic quota update for immediate UI feedback
+		// This increments the displayed count before server confirms
+		// Server response (run_done) will reconcile with actual values
+		if (platformKeyCount > 0 && $isAuthenticated) {
+			quota.incrementUsed(platformKeyCount);
+		}
 
 		try {
 			// Build conversation history (all previous messages excluding the one we just added)
@@ -1662,11 +1675,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			providerKey = await getProviderKey(selectedBot.provider, encryptionKey);
 		}
 		
-		// Check if we have either a BYOK key or a static API key
-		if (!providerKey && !API_KEY) {
-			showAlert('API Key Required', 'No API key configured for this provider.\n\nPlease add your API key in Settings.', 'warning');
-			return;
-		}
+		// Note: If no BYOK key, backend will use platform keys as fallback
 
 		isSummarizing = true;
 		selectedSummaryBot = selectedBot;
@@ -1784,17 +1793,29 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				}
 				summaryResultOpen = true;
 				isSummarizing = false;
+				// Refresh quota after summarization
+				if ($isAuthenticated) {
+					quota.fetchQuota();
+				}
 			} catch (streamError) {
 				console.error('Stream error:', streamError);
 				summaryContent = `❌ Failed to stream summary: ${streamError instanceof Error ? streamError.message : 'Unknown error'}`;
 				summaryResultOpen = true;
 				isSummarizing = false;
+				// Refresh quota even on error (message may have been counted)
+				if ($isAuthenticated) {
+					quota.fetchQuota();
+				}
 			}
 		} catch (error) {
 			console.error('Summarization error:', error);
 			summaryContent = `❌ Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`;
 			summaryResultOpen = true;
 			isSummarizing = false;
+			// Refresh quota even on error
+			if ($isAuthenticated) {
+				quota.fetchQuota();
+			}
 		}
 	}
 
