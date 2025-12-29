@@ -16,9 +16,9 @@ A privacy-first AI chat application with multi-bot support. Chat with multiple A
 
 | Provider | Models | Privacy |
 |----------|--------|---------|
-| OpenAI | GPT-4o, GPT-4o-mini | Not used for training |
-| Google Gemini | Gemini 2.0 Flash, Pro | Paid API tier (no training) |
-| Anthropic | Claude Sonnet 4, Opus 4 | Not used for training |
+| Anthropic | Claude Sonnet 4.5, Claude Haiku 4.5, Claude Opus 4.5 | Not used for training |
+| Google Gemini | Gemini 3 Pro Preview, Gemini 3 Flash Preview, Gemini 2.5 Flash, Gemini 2.5 Flash Lite, Gemini 2.5 Pro | Paid API tier (no training) |
+| OpenAI | GPT-5.2, GPT-5, GPT-5 Nano, GPT-4.1, GPT-5 Mini | Not used for training |
 
 ## 🛠️ Self-Hosting
 
