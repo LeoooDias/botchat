@@ -82,10 +82,6 @@
 							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">3</span>
 							<span><strong>Start chatting!</strong> — Type your message and all active bots will respond simultaneously.</span>
 						</li>
-                        <li class="flex gap-3">
-							<span class="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full flex items-center justify-center text-sm font-semibold">4</span>
-							<span><strong>Add API keys</strong> — Go to Settings (⚙️) and add your API keys from OpenAI, Anthropic, or Google. Your keys are encrypted and stored only in your browser.</span>
-						</li>
 					</ol>
 				</section>
 
@@ -96,9 +92,9 @@
 					</h3>
 					<ul class="text-green-700 dark:text-green-400 space-y-1 text-sm">
 						<li>• Your conversations are stored only in your browser</li>
-						<li>• API keys are encrypted client-side</li>
 						<li>• No server-side logging of your chats</li>
-						<li>• All AI providers configured for zero data retention</li>
+						<li>• When using botchat with built-in API keys, your data is never retained or used for model training</li>
+						<li>• If using your own API keys, they are encrypted and stored only in your browser</li>
 					</ul>
 				</section>
 

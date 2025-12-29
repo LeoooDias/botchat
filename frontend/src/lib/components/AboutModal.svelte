@@ -126,7 +126,7 @@
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
 									<p>Yes. Your chats and attachments are never stored on our servers. Ever.</p>
 									<p>Attachments are transmitted to AI providers through BytesIO streams, meaning they never touch disk in our servers.</p>
-									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk".</p>
+									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk"</p>
 									<p>If you're using your own API keys, they are encrypted with AES-256 and stored only in your browser's local storage.</p>
 								</div>
 							</details>
