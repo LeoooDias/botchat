@@ -24,6 +24,8 @@ const USER_KEYS = [
     'globalMaxTokens',
     'botchat_encrypted_keys',
     'botchat_encryption_key_hash',
+    'starterConfigInitialized',
+    'introModalDismissed',
 ] as const;
 
 // Keys that remain global (shared across users)

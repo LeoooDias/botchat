@@ -13,6 +13,7 @@
 	import SignInModal from '$lib/components/SignInModal.svelte';
 	import AboutModal from '$lib/components/AboutModal.svelte';
 	import AlertModal from '$lib/components/AlertModal.svelte';
+	import IntroModal from '$lib/components/IntroModal.svelte';
 	// Mobile components
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import MobileHeader from '$lib/components/MobileHeader.svelte';
@@ -25,6 +26,7 @@
 	import { getContextWindow } from '$lib/modelLimits';
 	import { getProviderKey, getConfiguredProviders, validateEncryptionKey } from '$lib/utils/keyEncryption';
 	import { getUserItem, setUserItem, removeUserItem, getGlobalItem, setGlobalItem, migrateUserData } from '$lib/utils/userStorage';
+	import { needsStarterConfig, getStarterBots, buildStarterConversation, STARTER_MESSAGE, type StarterBot } from '$lib/starterConfig';
 
 	// Alert modal state
 	let alertOpen = false;
@@ -107,6 +109,7 @@
 	let settingsOpen = false; // Settings modal state
 	let signInOpen = false; // Sign-in modal state
 	let aboutOpen = false; // About modal state
+	let introOpen = false; // Intro modal state (for new users)
 	let theme: 'light' | 'dark' = 'light'; // Theme state
 	let summarizeOpen = false; // Summarize modal state
 	let isSummarizing = false; // Summarization in progress
@@ -567,10 +570,65 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			} else if (conversations.length > 0) {
 				currentConversationId = conversations[0].id;
 			} else {
-				// Create initial conversation if none exist
-				createNewConversation();
+				// Check if this is a truly new user (never initialized before)
+				const initialized = getUserItem('starterConfigInitialized');
+				if (needsStarterConfig(initialized)) {
+					initializeStarterConfig();
+				} else {
+					// Create initial conversation if none exist
+					createNewConversation();
+				}
 			}
 		}
+	}
+
+	/**
+	 * Initialize starter configuration for new users.
+	 * Creates "The Decision Makers" bots and a sample conversation with pre-loaded question.
+	 */
+	function initializeStarterConfig() {
+		// Mark as initialized FIRST to prevent re-running even if something fails
+		setUserItem('starterConfigInitialized', 'true');
+		
+		// Get starter bots
+		const starterBots = getStarterBots();
+		
+		// Add starter bots to the user's bot library
+		bots = starterBots.map(b => ({
+			id: b.id,
+			provider: b.provider,
+			model: b.model,
+			name: b.name,
+			systemInstructionText: b.systemInstructionText,
+			category: b.category
+		}));
+		
+		// Save bots to localStorage
+		const serializable = bots.map((b) => ({
+			id: b.id,
+			provider: b.provider,
+			model: b.model,
+			systemInstructionText: b.systemInstructionText,
+			name: b.name,
+			maxTokens: b.maxTokens,
+			category: b.category
+		}));
+		setUserItem('savedBots', JSON.stringify(serializable));
+		
+		// Save the "Decision Makers" category
+		const categories = [{ name: 'Decision Makers', expanded: true }];
+		setUserItem('botCategories', JSON.stringify(categories));
+		
+		// Create starter conversation with active bots
+		const starterConversation = buildStarterConversation(starterBots);
+		conversations = [starterConversation];
+		currentConversationId = starterConversation.id;
+		
+		// Pre-load the starter question in the input
+		currentInputMessage = STARTER_MESSAGE;
+		
+		// Save conversations
+		saveConversations();
 	}
 
 	function toggleActiveBotsExpanded() {
@@ -718,6 +776,26 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		mobilePanel = 'none';
 	}
 
+	// Intro modal handlers
+	function handleIntroOk() {
+		// Close modal but don't set dismissal flag - will show again next login
+		introOpen = false;
+	}
+
+	function handleIntroDismiss() {
+		// Close modal and set dismissal flag - won't show again unless localStorage cleared
+		introOpen = false;
+		setUserItem('introModalDismissed', 'true');
+	}
+
+	function checkShowIntroModal() {
+		// Show intro modal if user hasn't permanently dismissed it
+		const dismissed = getUserItem('introModalDismissed');
+		if (dismissed !== 'true') {
+			introOpen = true;
+		}
+	}
+
 	function handleMobileConversationSelect(id: string) {
 		handleConversationClick(id);
 		closeMobilePanel();
@@ -813,6 +891,11 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			} catch (e) {
 				console.error('Failed to load bots:', e);
 			}
+		}
+
+		// Show intro modal for users who haven't dismissed it
+		if ($isAuthenticated) {
+			checkShowIntroModal();
 		}
 
 		// Listen for close event from SummaryResultModal
@@ -2266,6 +2349,9 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 
 <!-- About Modal -->
 <AboutModal bind:isOpen={aboutOpen} on:close={() => (aboutOpen = false)} />
+
+<!-- Intro Modal (for new users) -->
+<IntroModal bind:isOpen={introOpen} on:ok={handleIntroOk} on:dismiss={handleIntroDismiss} />
 
 <!-- Settings Modal -->
 <SettingsModal
