@@ -195,11 +195,30 @@
 									<p><strong>Your risk profile:</strong> You accept that prompts/responses may exist briefly on provider infrastructure for safety purposes. You trust that providers honor their published policies. In exchange, you avoid the broader data exposure of consumer chat products (where training opt-outs require manual action and misconfiguration is common).</p>
 									
 									<p class="text-sm pt-2"><strong>Dig deeper:</strong>
-										<a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Privacy</a> ·
+										<a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Privacy</a> ·
 										<a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">OpenAI Privacy</a> ·
-										<a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Gemini API Terms</a> ·
-										<a href="https://support.anthropic.com/en/articles/9360823-how-does-anthropic-use-my-data" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Data Use</a>
+										<a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Gemini API Terms</a>
 									</p>
+								</div>
+							</details>
+
+							<details class="group border border-gray-200 dark:border-gray-700 rounded-lg">
+								<summary class="flex items-center justify-between cursor-pointer px-4 py-3 font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg">
+									<span>What account data does botchat store about me?</span>
+									<svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+									</svg>
+								</summary>
+								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
+									<p><strong>For user management and billing, botchat stores:</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>Email address:</strong> Your primary account identifier (when provided by your OAuth provider)</li>
+										<li><strong>Sign-up date:</strong> When you created your account</li>
+										<li><strong>Message count:</strong> How many messages you've sent using our keys during the current billing period</li>
+										<li><strong>Subscription details:</strong> Your plan status and subscription expiration (if applicable)</li>
+									</ul>
+									<p><strong>Email-based account linking:</strong> Your account is tied to your email address, not your OAuth provider. If you sign in with GitHub one day and Google the next—using the same email—you'll access the same account and subscription. This means you can switch sign-in methods without losing your subscription or quota.</p>
+									<p><strong>What this means:</strong> We store the minimum data required to authenticate you and manage billing/quotas. We don't even store your name. We do <em>not</em> store your chats, prompts, attachments, bot configurations, or any conversation content—that lives only in your browser.</p>
 								</div>
 							</details>
 
