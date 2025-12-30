@@ -103,7 +103,7 @@ botchat/
 
 - **No server-side conversation storage** - Messages exist only in your browser's localStorage
 - **Client-side encryption** - API keys are encrypted with AES-256 before storage
-- **Zero retention providers** - All supported AI providers configured for zero data retention
+- **No model training** - All supported AI providers configured to not use your data for training
 - **Minimal auth data** - Only email/name stored for authentication
 
 ## 📄 License
