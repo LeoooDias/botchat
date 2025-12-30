@@ -173,6 +173,38 @@
 							
 							<details class="group border border-gray-200 dark:border-gray-700 rounded-lg">
 								<summary class="flex items-center justify-between cursor-pointer px-4 py-3 font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg">
+									<span>When I use botchat, what data is stored, why, by whom, and for how long?</span>
+									<svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+									</svg>
+								</summary>
+								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
+									<p><strong>What botchat stores:</strong> Nothing. Your chats, prompts, and attachments never touch our servers. Attachments stream directly to AI providers via memory buffers—they're never written to disk on our side. Your chat history lives only in your browser. This means chats don't sync across devices (a deliberate tradeoff, like Signal requiring manual backup).</p>
+									
+									<p><strong>What AI providers store:</strong> When you send a message, it goes directly to the AI provider (OpenAI, Anthropic, or Google). By using API endpoints (not consumer chat products), botchat ensures your data is <em>not</em> used for model training—this is the default for API access. However, providers temporarily retain data for <strong>trust &amp; safety</strong> (abuse detection, policy enforcement, legal compliance):</p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>Anthropic (Claude):</strong> Up to 30 days for safety monitoring</li>
+										<li><strong>OpenAI:</strong> Limited retention window for abuse/security (duration varies by tier)</li>
+										<li><strong>Google (Gemini):</strong> Up to 30 days for abuse monitoring (exemptions available)</li>
+									</ul>
+									
+									<p><strong>What this means for you:</strong> Your data isn't used to train AI models. The temporary retention is for safety—detecting misuse, responding to legal obligations—not for improving their products with your content. After the retention window, data is deleted.</p>
+									
+									<p><strong>The uncertainty we can't eliminate:</strong> Provider policies can change. Retention periods may vary by account tier or region. Legal holds can extend retention. We can't audit provider infrastructure. What we <em>can</em> guarantee: botchat grabs every privacy lever the APIs expose, so you get the strongest default protections available without enterprise contracts or manual configuration.</p>
+									
+									<p><strong>Your risk profile:</strong> You accept that prompts/responses may exist briefly on provider infrastructure for safety purposes. You trust that providers honor their published policies. In exchange, you avoid the broader data exposure of consumer chat products (where training opt-outs require manual action and misconfiguration is common).</p>
+									
+									<p class="text-sm pt-2"><strong>Dig deeper:</strong>
+										<a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Privacy</a> ·
+										<a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">OpenAI Privacy</a> ·
+										<a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Gemini API Terms</a> ·
+										<a href="https://support.anthropic.com/en/articles/9360823-how-does-anthropic-use-my-data" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Data Use</a>
+									</p>
+								</div>
+							</details>
+
+							<details class="group border border-gray-200 dark:border-gray-700 rounded-lg">
+								<summary class="flex items-center justify-between cursor-pointer px-4 py-3 font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg">
 									<span>How do I contact support?</span>
 									<svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
