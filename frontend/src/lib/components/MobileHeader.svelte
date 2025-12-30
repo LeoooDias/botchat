@@ -91,7 +91,7 @@
 			{#if isAuthenticated}
 				<button 
 					type="button"
-					class="px-1.5 py-0.5 text-[10px] font-medium rounded instant-tooltip {isQuotaExhausted ? 'bg-red-500/30 text-red-200' : 'bg-white/10 text-blue-100'}"
+					class="px-1.5 py-0.5 text-[10px] font-medium rounded instant-tooltip tooltip-bottom {isQuotaExhausted ? 'bg-red-500/30 text-red-200' : 'bg-white/10 text-blue-100'}"
 					data-tooltip="Messages used: {quotaUsed}/{quotaLimit}"
 					on:click={toggleQuotaTooltip}
 					bind:this={quotaElement}

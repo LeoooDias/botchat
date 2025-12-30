@@ -146,6 +146,25 @@ body {
   margin-bottom: 4px;
 }
 
+/* Tooltip positioned to the left of element */
+.instant-tooltip.tooltip-left::after {
+  bottom: auto;
+  left: auto;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-bottom: 0;
+  margin-right: 6px;
+}
+
+/* Tooltip positioned below element */
+.instant-tooltip.tooltip-bottom::after {
+  bottom: auto;
+  top: 100%;
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+
 .dark .instant-tooltip::after {
   background: #374151;
 }

@@ -2060,7 +2060,22 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		<!-- Chat Area (full width on mobile, expands when sidebar is closed on desktop) -->
 		<div class="flex flex-col overflow-hidden bg-white md:bg-gray-50 dark:bg-gray-800 md:rounded-lg md:border border-gray-200 dark:border-gray-700 md:shadow-sm transition-all duration-300 flex-1 order-3">
 			<!-- Conversation Tabs (desktop only) -->
-			<div class="hidden md:flex items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-x-auto">
+			<div class="hidden md:flex items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+				<!-- Fixed New Tab Button (always first, never scrolls) -->
+				<button
+					on:click={createNewConversation}
+					class={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-t-lg transition text-xs font-medium ${
+						streamingCount > 0 || !canCreateConversation
+							? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+							: 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800'
+					}`}
+					title={streamingCount > 0 ? 'Wait for response to complete' : !canCreateConversation ? `Free tier limit: ${$tierLimits.maxConversations} chats` : 'Create new chat'}
+					disabled={streamingCount > 0 || !canCreateConversation}
+				>
+					+ New
+				</button>
+				<!-- Scrollable Tab Container -->
+				<div class="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 scrollbar-thin">
 				{#each conversations as conv, index (conv.id)}
 					<div
 						class={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg transition-all text-xs font-medium whitespace-nowrap relative ${
@@ -2131,18 +2146,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						</button>
 					</div>
 				{/each}
-				<button
-					on:click={createNewConversation}
-					class={`flex items-center gap-1 px-3 py-1.5 rounded-t-lg transition text-xs font-medium ${
-						streamingCount > 0 || !canCreateConversation
-							? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-							: 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-					}`}
-					title={streamingCount > 0 ? 'Wait for response to complete' : !canCreateConversation ? `Free tier limit: ${$tierLimits.maxConversations} chats` : 'Create new chat'}
-					disabled={streamingCount > 0 || !canCreateConversation}
-				>
-					+ New
-				</button>
+				</div>
 			</div>
 
 			<!-- Chat Header with Description and Action Buttons (desktop only) -->
@@ -2267,7 +2271,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						<!-- Quota Label (rightmost) -->
 						{#if $isAuthenticated}
 							<span 
-								class="text-xs font-medium whitespace-nowrap flex items-center gap-1 instant-tooltip {$isQuotaExhausted ? 'text-red-600 dark:text-red-400' : $quotaPercentage >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}"
+								class="text-xs font-medium whitespace-nowrap flex items-center gap-1 instant-tooltip tooltip-left {$isQuotaExhausted ? 'text-red-600 dark:text-red-400' : $quotaPercentage >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}"
 								data-tooltip="Messages used this month"
 							>
 								{$quota.used}/{$quota.limit}
