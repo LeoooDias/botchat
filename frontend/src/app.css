@@ -30,6 +30,11 @@ body {
   padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
 }
 
+/* Bottom padding for content above fixed bottom nav - accounts for nav height + safe area */
+.pb-mobile-nav {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* Smooth iOS-style momentum scrolling */
 .mobile-scroll {
   -webkit-overflow-scrolling: touch;

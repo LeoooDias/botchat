@@ -166,6 +166,29 @@ export const isSessionValid = derived(auth, $auth => {
 const API_BASE = (browser && (import.meta.env.VITE_API_BASE as string)) || 'http://localhost:8000';
 
 /**
+ * Detect if running in an embedded webview (e.g., LinkedIn, Facebook, Instagram in-app browsers).
+ * Google OAuth blocks these with error 403: disallowed_useragent.
+ */
+function isEmbeddedWebview(): boolean {
+	if (!browser) return false;
+	const ua = navigator.userAgent || navigator.vendor || '';
+	// Common webview indicators
+	const webviewPatterns = [
+		/FBAN|FBAV/i,           // Facebook app
+		/Instagram/i,           // Instagram app
+		/LinkedIn/i,            // LinkedIn app
+		/Twitter/i,             // Twitter/X app
+		/Snapchat/i,            // Snapchat
+		/Pinterest/i,           // Pinterest
+		/TikTok/i,              // TikTok
+		/wv\)/i,                // Android WebView
+		/; wv\)/i,              // Android WebView variant
+		/WebView/i,             // Generic WebView
+	];
+	return webviewPatterns.some(pattern => pattern.test(ua));
+}
+
+/**
  * Get OAuth authorization URL for a provider.
  */
 export async function getAuthUrl(provider: 'github' | 'google'): Promise<string> {
@@ -220,11 +243,20 @@ export async function exchangeCode(
 
 /**
  * Start OAuth flow by redirecting to provider.
+ * Detects embedded webviews for Google OAuth (which blocks them).
  */
 export async function startOAuthFlow(provider: 'github' | 'google'): Promise<void> {
 	console.log(`[Auth] Starting ${provider} OAuth flow`);
 	auth.setLoading(true);
 	auth.clearError();
+	
+	// Google blocks OAuth in embedded webviews (error 403: disallowed_useragent)
+	// GitHub allows it, so only check for Google
+	if (provider === 'google' && isEmbeddedWebview()) {
+		console.log(`[Auth] Detected embedded webview, blocking Google OAuth`);
+		auth.setError('Google sign-in is blocked in this browser. Please open botchat in Safari, Chrome, or another browser. Alternatively, use GitHub sign-in.');
+		return;
+	}
 	
 	try {
 		console.log(`[Auth] Fetching auth URL from API_BASE: ${API_BASE}`);

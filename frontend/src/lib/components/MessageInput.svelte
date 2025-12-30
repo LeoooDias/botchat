@@ -71,8 +71,14 @@
 	function autoResize() {
 		if (inputElement) {
 			inputElement.style.height = 'auto';
-			// Limit to ~5 lines (approx 120px)
-			inputElement.style.height = Math.min(inputElement.scrollHeight, 120) + 'px';
+			const scrollHeight = inputElement.scrollHeight;
+			// Mobile: max 4 lines (~96px), expand to min 2 lines (~48px) only when content needs it
+			// Desktop: max 5 lines (~120px)
+			const isMobile = window.innerWidth < 768;
+			const maxHeight = isMobile ? 96 : 120;
+			// On mobile, if content overflows 1 line, jump to at least 2 lines for readability
+			const minHeight = (isMobile && scrollHeight > 32) ? 48 : 0;
+			inputElement.style.height = Math.max(minHeight, Math.min(scrollHeight, maxHeight)) + 'px';
 		}
 		// Update token estimate as user types
 		estimatedTokens = estimateTokens(currentMessage);
@@ -82,10 +88,16 @@
 	$: if (currentMessage || activeBots.length > 0 || globalAttachments.length > 0) {
 		estimatedTokens = estimateTokens(currentMessage);
 	}
+
+	// Set initial height on mount for mobile
+	import { onMount } from 'svelte';
+	onMount(() => {
+		autoResize();
+	});
 </script>
 
 <div class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 md:p-3 md:rounded-b-lg">
-	<div class="flex items-stretch border border-gray-300 dark:border-gray-600 rounded-xl md:rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 overflow-hidden bg-gray-50 dark:bg-gray-700">
+	<div class="flex items-start border border-gray-300 dark:border-gray-600 rounded-xl md:rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 overflow-hidden bg-gray-50 dark:bg-gray-700">
 		<textarea
 			bind:this={inputElement}
 			bind:value={currentMessage}

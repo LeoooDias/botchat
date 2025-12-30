@@ -4,12 +4,14 @@
 	Modal dialog with GitHub and Google sign-in options.
 -->
 <script lang="ts">
-	import { startOAuthFlow } from '$lib/stores/auth';
+	import { startOAuthFlow, authError, auth } from '$lib/stores/auth';
 
 	export let open = false;
 
 	function close() {
 		open = false;
+		// Clear any auth errors when closing
+		auth.clearError();
 	}
 
 	async function handleGitHubLogin() {
@@ -52,6 +54,13 @@
 					</svg>
 				</button>
 			</div>
+
+			<!-- Error message (e.g., webview detection) -->
+			{#if $authError}
+				<div class="mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg">
+					<p class="text-sm text-amber-800 dark:text-amber-200">{$authError}</p>
+				</div>
+			{/if}
 
 			<!-- Sign-in buttons -->
 			<div class="space-y-3">

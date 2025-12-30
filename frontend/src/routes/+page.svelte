@@ -2302,7 +2302,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			</div>
 			
 			<!-- Message Input (with bottom padding for mobile nav bar) -->
-			<div class="pb-20 md:pb-0">
+			<div class="pb-mobile-nav md:pb-0">
 				<MessageInput on:send={(e: CustomEvent<string>) => sendMessage(e.detail)} {isLoading} botsCount={activeBots.length} onCancel={cancelMessage} {messages} {activeBots} {globalAttachments} hasOversizedAttachments={hasOversizedAttachments} bind:currentMessage={currentInputMessage} />
 			</div>
 			
