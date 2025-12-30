@@ -92,8 +92,8 @@
 					</h3>
 					<ul class="text-green-700 dark:text-green-400 space-y-1 text-sm">
 						<li>• Your conversations are stored only in your browser</li>
-						<li>• No server-side logging of your chats</li>
-						<li>• When using botchat with built-in API keys, your data is never retained or used for model training</li>
+						<li>• botchat never stores chats or attachments on our servers</li>
+						<li>• When using botchat with built-in API keys, your data is never retained by AI providers for model training</li>
 						<li>• If using your own API keys, they are encrypted and stored only in your browser</li>
 					</ul>
 				</section>

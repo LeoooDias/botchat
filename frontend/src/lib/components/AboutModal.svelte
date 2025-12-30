@@ -60,9 +60,9 @@
 					<section class="mb-8">
 						<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-3">What is botchat?</h3>
 						<p class="text-gray-600 dark:text-gray-300 leading-relaxed">
-							botchat is a privacy-preserving, multi-bot chat tool that lets you interact with multiple AI models simultaneously.
+							botchat is a privacy-preserving, multi-bot chat tool that lets you interact with multiple AI models simultaneously.</p><p>
 							Give bots personas, so they look at your question from multiple angles. Leverage the strengths of different models in the same chat. And most importantly, protect your data.</p><p>
-							botchat never stores your conversations or attachments on any servers. And your data is never retained by the AI provider for model training.
+							botchat never stores your conversations or attachments on any servers and, if you are using our keys (the default expedrience), your data is never retained by the AI provider for model training.
 						</p>
 					</section>
 
@@ -71,7 +71,7 @@
 						<ul class="list-disc list-inside text-gray-600 dark:text-gray-300 space-y-2">
 							<li>Chat with multiple AI bots in a single conversation</li>
 							<li>Support for OpenAI, Anthropic (Claude), and Google Gemini</li>
-							<li>No AI provider data retention for model training.</li>							
+							<li>No AI provider data retention for model training</li>							
 							<li>Customizable personalities and instructions per bot</li>
 							<li>File attachments and PDF support (your attachments never touch botchat servers)</li>
 							<li>Privacy-by-design: botchat never stores chat or attachments on our servers</li>
@@ -99,6 +99,7 @@
 										<li>Analyzing something from multiple perspectives</li>
 										<li>Keeping data private and confidential</li>
 									</ol>
+									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what companies do with your data *outside* of the model prompt. Do they retain your data to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by bringing all the scaffolding to your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't retain your data for model training purposes ever.</p>
 								</div>
 							</details>
 							
@@ -112,7 +113,8 @@
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
 									<p>botchat is a minimalist tool. It provides the minimal scaffolding to organize group chats with AI models. </p>
 									<p>When you send a message, botchat forwards it to each bot's configured AI provider. No data is stored on botchat servers.</p>
-									<p>It's widely known that AI providers (e.g., OpenAI, Google, Anthropic) offer more control over data retention and privacy through their APIs.</p> <p>botchat makes it easy to leverage the value of AI chatbots while keeping your information private.</p>
+									<p>It's widely known that AI providers (e.g., OpenAI, Google, Anthropic) offer more control over data retention and privacy through their APIs. botchat leverages this flexibility, simplifying the process of taking a private-by-default stance.</p> <p>botchat makes it easy to leverage the value of AI chatbots while keeping your information private.</p>
+									<p></p>
 								</div>
 							</details>
 
@@ -124,10 +126,11 @@
 									</svg>
 								</summary>
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
-									<p>Yes. Your chats and attachments are never stored on our servers. Ever.</p>
+									<p>Yes. Your chats and attachments are never stored on our servers.</p>
 									<p>Attachments are transmitted to AI providers through BytesIO streams, meaning they never touch disk in our servers.</p>
 									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk"</p>
-									<p>If you're using your own API keys, they are encrypted with AES-256 and stored only in your browser's local storage.</p>
+									<p>If you're using your own API keys, they are encrypted with AES-256 and stored only in your browser's local storage, and your data retention settings are fully within your control.</p>
+									<p>AI providers retain data briefly for abuse monitoring only.</p>
 								</div>
 							</details>
 
