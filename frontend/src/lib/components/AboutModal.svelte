@@ -143,7 +143,7 @@
 								</summary>
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
 									<p>Free users can create up to 3 chats with 3 bots each, and 100 messages per month.</p><p>Paid subscribers get 5,000 messages per month and up to 10 bots per chat.</p>
-									<p>Paid subscribers using their own API keys (BYOKG) get unlimited messages.</p>
+									<p>Paid subscribers using their own API keys (BYOK) get unlimited messages.</p>
 								</div>
 							</details>
 
