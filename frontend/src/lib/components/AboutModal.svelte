@@ -62,7 +62,7 @@
 						<p class="text-gray-600 dark:text-gray-300 leading-relaxed">
 							botchat is a privacy-preserving, multi-bot chat tool that lets you interact with multiple AI models simultaneously.</p><p>
 							Give bots personas, so they look at your question from multiple angles. Leverage the strengths of different models in the same chat. And most importantly, protect your data.</p><p>
-							botchat never stores your conversations or attachments on any servers and, if you are using our keys (the default expedrience), your data is never retained by the AI provider for model training.
+							botchat never stores your conversations or attachments on any servers and, if you are using our keys (the default experience), your data is never retained by the AI provider for model training.
 						</p>
 					</section>
 
@@ -142,8 +142,8 @@
 									</svg>
 								</summary>
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
-									<p>When you first sign into botchat, you get 100 free messages.</p>
-									<p>Free users can create up to 3 chats with 3 bots each.</p><p>Subscribers get unlimited chats and up to 10 bots per chat.</p>
+									<p>Free users can create up to 3 chats with 3 bots each, and 100 messages per month.</p><p>Paid subscribers get 5,000 messages per month and up to 10 bots per chat.</p>
+									<p>Paid subscribers using their own API keys (BYOKG) get unlimited messages.</p>
 								</div>
 							</details>
 
