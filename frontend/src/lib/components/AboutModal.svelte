@@ -99,7 +99,7 @@
 										<li>Analyzing something from multiple perspectives</li>
 										<li>Keeping data private and confidential</li>
 									</ol>
-									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what companies do with your data *outside* of the model prompt. Do they retain your data to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by bringing all the scaffolding to your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't retain your data for model training purposes ever.</p>
+									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie purely in what is done with your data *outside* of the model prompt. Does that AI provider use your chat history to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by bringing all the scaffolding to your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't retain your data for model training purposes ever.</p>
 								</div>
 							</details>
 							
