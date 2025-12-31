@@ -18,19 +18,31 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
-# msgmodel: Used for OpenAI and Anthropic (v2.2.0)
-# Gemini migrated to native providers module
-from msgmodel import stream as msgmodel_stream, OpenAIConfig, AnthropicConfig
-from msgmodel.providers import OpenAIProvider, AnthropicProvider
 from pypdf import PdfReader
 
-# Native Gemini provider (Vertex AI + AI Studio)
+# Native AI Providers (v2.4.0 - fully native, no msgmodel dependency)
 from app.providers.gemini import (
     GeminiProvider as NativeGeminiProvider,
     stream_gemini,
     get_gemini_privacy_info,
     GeminiAPIError,
     RateLimitError as GeminiRateLimitError,
+)
+
+from app.providers.openai import (
+    OpenAIProvider as NativeOpenAIProvider,
+    stream_openai,
+    get_openai_privacy_info,
+    OpenAIAPIError,
+    RateLimitError as OpenAIRateLimitError,
+)
+
+from app.providers.anthropic import (
+    AnthropicProvider as NativeAnthropicProvider,
+    stream_anthropic,
+    get_anthropic_privacy_info,
+    AnthropicAPIError,
+    RateLimitError as AnthropicRateLimitError,
 )
 
 # Key management
@@ -220,7 +232,7 @@ def get_privacy_info(provider: str, api_key: Optional[str] = None) -> Optional[D
     
     Args:
         provider: Provider name (openai, gemini, anthropic)
-        api_key: For Gemini, determines if using Vertex AI (None) or AI Studio (key)
+        api_key: For determining BYOK vs platform mode privacy info
     
     Returns privacy info dict or None if provider is unknown.
     """
@@ -228,15 +240,14 @@ def get_privacy_info(provider: str, api_key: Optional[str] = None) -> Optional[D
     
     try:
         if provider_lower == "openai":
-            return OpenAIProvider.get_privacy_info()
+            return get_openai_privacy_info(api_key=api_key)
         elif provider_lower == "gemini":
-            # v2.2.0: Use native Gemini provider for privacy info
-            # Returns different info based on backend (Vertex AI vs AI Studio)
             return get_gemini_privacy_info(api_key=api_key)
         elif provider_lower == "anthropic":
-            return AnthropicProvider.get_privacy_info()
+            return get_anthropic_privacy_info(api_key=api_key)
         else:
             logger.warning("Unknown provider for privacy info: %s", provider)
+            return None
             return None
     except Exception as e:
         logger.error("Failed to fetch privacy info for %s: %s", provider, str(e))
@@ -469,17 +480,18 @@ async def publish(run: RunState, event: str, data: Any) -> None:
 
 
 # -----------------------------
-# Fake "LLM" streaming (replace with msgmodel)
+# Provider Streaming
 # -----------------------------
 
-async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, file_like: Optional[io.BytesIO] = None, filename: Optional[str] = None, extracted_text: Optional[str] = None) -> None:
+async def stream_to_provider(run: RunState, cfg: ModelConfig, message: str, file_like: Optional[io.BytesIO] = None, filename: Optional[str] = None, extracted_text: Optional[str] = None) -> None:
     """Stream one provider's response to a message (optionally with attachment).
     
-    v2.2.0 ARCHITECTURE:
+    v2.4.0 ARCHITECTURE - All native providers:
     - Gemini: Native provider via Vertex AI (platform) or AI Studio (BYOK)
-    - OpenAI/Anthropic: Still using msgmodel (migration in v2.3.0/v2.4.0)
+    - OpenAI: Native provider (platform or BYOK)
+    - Anthropic: Native provider (platform or BYOK)
     
-    For PDFs with OpenAI: extracted_text contains the PDF text content, used instead of file_like.
+    For PDFs with OpenAI/Anthropic: extracted_text contains the PDF text content.
     
     Privacy metadata is fetched and sent to the frontend for transparency.
     Each request is completely independent and stateless.
@@ -487,7 +499,7 @@ async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, fil
     await publish(run, "panel_start", {"config_id": cfg.id})
 
     # Fetch and send privacy metadata for this provider
-    # For Gemini, pass api_key to determine Vertex AI vs AI Studio privacy info
+    # Pass api_key to determine BYOK vs platform privacy info
     privacy_info = get_privacy_info(cfg.provider, api_key=cfg.provider_key)
     await publish(run, "panel_privacy", {
         "config_id": cfg.id,
@@ -497,16 +509,18 @@ async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, fil
     loop = asyncio.get_running_loop()
     final_parts: list[str] = []
     
-    # Route to appropriate streaming implementation
+    # Route to appropriate native streaming implementation
     provider_lower = cfg.provider.lower()
     
     if provider_lower == "gemini":
-        # v2.2.0: Native Gemini provider (Vertex AI or AI Studio)
         await _stream_gemini_native(run, cfg, message, file_like, filename, extracted_text, loop, final_parts)
+    elif provider_lower == "openai":
+        await _stream_openai_native(run, cfg, message, file_like, filename, extracted_text, loop, final_parts)
+    elif provider_lower == "anthropic":
+        await _stream_anthropic_native(run, cfg, message, file_like, filename, extracted_text, loop, final_parts)
     else:
-        # OpenAI and Anthropic: Use msgmodel (v2.3.0/v2.4.0 will migrate these)
-        config_obj = build_config(cfg)
-        await _stream_via_msgmodel(run, cfg, message, file_like, filename, extracted_text, loop, final_parts, config_obj)
+        # Unknown provider
+        await publish(run, "panel_error", {"config_id": cfg.id, "error": f"Unknown provider: {cfg.provider}"})
 
 
 async def _stream_gemini_native(
@@ -627,7 +641,7 @@ async def _stream_gemini_native(
         await publish(run, "panel_error", {"config_id": cfg.id, "error": str(e)})
 
 
-async def _stream_via_msgmodel(
+async def _stream_openai_native(
     run: RunState, 
     cfg: ModelConfig, 
     message: str, 
@@ -635,80 +649,70 @@ async def _stream_via_msgmodel(
     filename: Optional[str], 
     extracted_text: Optional[str],
     loop: asyncio.AbstractEventLoop,
-    final_parts: list[str],
-    config_obj: Any
+    final_parts: list[str]
 ) -> None:
-    """Stream response using msgmodel (OpenAI and Anthropic).
+    """Stream response using native OpenAI provider.
     
-    This will be replaced in v2.3.0 (Anthropic) and v2.4.0 (OpenAI).
+    v2.3.0: Replaces msgmodel for OpenAI with direct SDK integration.
+    - Platform usage: botchat's API key (no ZDR agreement)
+    - BYOK usage: User's API key (ZDR honored if they have enterprise agreement)
+    
+    Privacy note: X-OpenAI-No-Store header is always sent, but only honored
+    for organizations with formal ZDR agreements.
     """
-    def _run_in_thread():
-        # msgmodel.stream(provider, message, config, system_instruction, file_like, filename)
-        # 
-        # v3.2.0+ ARCHITECTURE:
-        # - file_like: Optional[io.BytesIO] - in-memory file wrapped in BytesIO (never uploaded to server)
-        # - filename: str - REQUIRED when file_like present, used for MIME type detection
-        # - No file cleanup needed; BytesIO is garbage collected automatically
-        # - No Files API calls; base64 inline encoding handled internally by msgmodel
-        # 
-        # PDF HANDLING:
-        # - For OpenAI: extracted_text contains PDF text, prepended to message
-        # - For Gemini: file_like contains original PDF for native support
-        #
-        # STREAMING WITH RETRY (v3.3.0+ Support):
-        # - Retries on rate limits (429) with exponential backoff
-        # - Raises StreamingError on empty responses (will be caught below)
-        # - Raises APIError for other API failures
-        
+    def _run_openai_thread():
         max_retries = 3
         retry_count = 0
+        max_tokens_to_use = cfg.max_tokens or 4000
+        
+        # Determine which key to use (None = platform key)
+        api_key = cfg.provider_key  # None for platform, user key for BYOK
         
         while retry_count <= max_retries:
             try:
-                stream_kwargs = {"config": config_obj}
-                if cfg.system:
-                    stream_kwargs["system_instruction"] = cfg.system
-                
-                # CRITICAL: Set max_tokens with smart defaults
-                # Without this, OpenAI defaults are too low for multi-turn conversations.
-                # finish_reason: "length" means token limit was hit mid-response.
-                # Default to 4000 tokens for better multi-turn conversation support
-                max_tokens_to_use = cfg.max_tokens or 4000  # Default to 4000 if not specified
-                stream_kwargs["max_tokens"] = max_tokens_to_use
-                logger.debug("max_tokens set to %d for %s %s", max_tokens_to_use, cfg.provider, cfg.model)
-                                # If we have extracted text (multiple files, or PDFs for OpenAI), prepend it to the message
+                # Build effective message with any extracted text (PDFs)
                 effective_message = message
                 if extracted_text:
-                    # Format extracted text with clear separation
                     effective_message = f"{extracted_text}\n\n---\n\n[User Query]\n{message}"
-                    logger.debug("Using extracted text (%d chars) for %s", len(extracted_text), cfg.provider)
+                    logger.debug("Using extracted text (%d chars) for OpenAI", len(extracted_text))
                 
-                if file_like:
-                    # PRIVACY GUARANTEE: Files never uploaded to provider servers.
-                    # Instead, base64 inline encoding is used (handled by msgmodel internally).
-                    file_like.seek(0)  # Ensure we're at the start
-                    stream_kwargs["file_like"] = file_like
-                    if filename:
-                        # Filename is essential for MIME type detection.
-                        # msgmodel uses this to set Content-Type on base64-encoded data.
-                        stream_kwargs["filename"] = filename
-                    logger.debug("File passed to stream: filename=%s, size=%d bytes", filename, len(file_like.getvalue()))
+                # Build file data for native provider (images only)
+                file_data = None
+                if file_like and filename:
+                    file_like.seek(0)
+                    file_bytes = file_like.read()
+                    mime_type = _get_mime_type(filename)
+                    
+                    # OpenAI only supports images natively, PDFs are text-extracted
+                    if mime_type.startswith("image/"):
+                        file_data = [{"bytes": file_bytes, "mime_type": mime_type, "name": filename}]
+                        logger.debug("Image prepared for OpenAI: %s (%s, %d bytes)", 
+                                   filename, mime_type, len(file_bytes))
+                    else:
+                        logger.debug("Non-image file %s handled via text extraction", filename)
                 
-                logger.debug("Calling stream with provider=%s, kwargs=%s (attempt %d/%d)", 
-                           cfg.provider.lower(), list(stream_kwargs.keys()), retry_count + 1, max_retries + 1)
+                logger.debug("Calling native OpenAI provider: model=%s, backend=%s (attempt %d/%d)",
+                           cfg.model, "byok" if api_key else "platform", 
+                           retry_count + 1, max_retries + 1)
                 
-                final_parts.clear()  # Clear previous attempt if retrying
-                for chunk in msgmodel_stream(cfg.provider.lower(), effective_message, **stream_kwargs):
+                final_parts.clear()
+                for chunk in stream_openai(
+                    message=effective_message,
+                    model=cfg.model,
+                    api_key=api_key,
+                    system_instruction=cfg.system if cfg.system else None,
+                    max_tokens=max_tokens_to_use,
+                    file_data=file_data,
+                ):
                     final_parts.append(chunk)
-                    # Push token to the SSE queue on the event loop thread
                     loop.call_soon_threadsafe(
                         run.queue.put_nowait,
                         sse("panel_token", {"config_id": cfg.id, "token": chunk}),
                     )
+                
                 final = "".join(final_parts).strip()
                 run.finals[cfg.id] = final
                 
-                # Track successful platform key usage for quota increment
                 if cfg.id in run.platform_key_configs:
                     run.successful_platform_configs.append(cfg.id)
                 
@@ -716,61 +720,172 @@ async def _stream_via_msgmodel(
                     run.queue.put_nowait,
                     sse("panel_final", {"config_id": cfg.id, "final": final}),
                 )
-                return  # Success - exit retry loop
+                return  # Success
                 
-            except Exception as e:
-                error_type = type(e).__name__
-                error_msg = str(e)
-                
-                # Handle StreamingError from msgmodel (empty response)
-                # ROOT CAUSE: This typically occurs when:
-                # 1. max_tokens is set too low (model finishes before generating content)
-                # 2. System prompt + user message is very long (consumes available tokens)
-                # 3. Model hits output token limit immediately (finish_reason: "length")
-                # SOLUTION: Validate max_tokens >= 100, or let msgmodel handle defaults
-                if error_type == "StreamingError":
-                    # This typically means the model finished without generating content
-                    # Often due to hitting token limits or other edge cases
-                    user_friendly_msg = "Model ran out of tokens. With 3+ parallel responses, token limits can be tight. Try: (1) Shorter prompts, (2) Clearing old messages, or (3) Increasing max_tokens in bot settings."
-                    logger.warning("StreamingError from %s: %s | max_tokens was %d", cfg.provider, error_msg, max_tokens_to_use)
-                    loop.call_soon_threadsafe(
-                        run.queue.put_nowait,
-                        sse("panel_error", {"config_id": cfg.id, "error": user_friendly_msg}),
-                    )
-                    return
-                
-                # Check for rate limit errors (msgmodel v3.3.0+)
-                is_rate_limit = (
-                    error_type == "RateLimitError" or
-                    (error_type == "APIError" and "rate" in error_msg.lower()) or
-                    (error_type == "APIError" and "429" in error_msg)
-                )
-                
-                if is_rate_limit and retry_count < max_retries:
-                    # Exponential backoff: 2^retry_count (1s, 2s, 4s)
+            except OpenAIRateLimitError as e:
+                if retry_count < max_retries:
                     wait_time = 2 ** retry_count
                     retry_count += 1
-                    logger.warning("Rate limited on %s. Retrying in %ds (attempt %d/%d). Error: %s",
-                                 cfg.provider, wait_time, retry_count, max_retries, error_msg)
+                    logger.warning("Rate limited on OpenAI. Retrying in %ds (attempt %d/%d). Error: %s",
+                                 wait_time, retry_count, max_retries, str(e))
                     time.sleep(wait_time)
-                    continue  # Retry
-                
-                # Not retryable or max retries exceeded
-                full_error_msg = f"{error_type}: {error_msg}"
-                if retry_count > 0 and is_rate_limit:
-                    full_error_msg = f"Rate limited after {retry_count} retries: {error_msg}"
-                
-                logger.error("Exception in stream(): %s", full_error_msg, exc_info=True)
+                    continue
+                else:
+                    error_msg = f"Rate limited after {retry_count} retries: {str(e)}"
+                    logger.error("OpenAI rate limit exceeded: %s", error_msg)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                    )
+                    return
+                    
+            except OpenAIAPIError as e:
+                error_msg = str(e)
+                logger.error("OpenAI API error: %s", error_msg, exc_info=True)
                 loop.call_soon_threadsafe(
                     run.queue.put_nowait,
-                    sse("panel_error", {"config_id": cfg.id, "error": full_error_msg}),
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
                 )
-                return  # Exit on non-retryable error
-
+                return
+                
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error("Unexpected error in OpenAI stream: %s", error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                )
+                return
+    
     try:
-        await asyncio.to_thread(_run_in_thread)
+        await asyncio.to_thread(_run_openai_thread)
         final = run.finals.get(cfg.id, "")
-        if not final:  # Only publish if not already published in _run_in_thread
+        if not final:
+            await publish(run, "panel_final", {"config_id": cfg.id, "final": final})
+    except Exception as e:
+        await publish(run, "panel_error", {"config_id": cfg.id, "error": str(e)})
+
+
+async def _stream_anthropic_native(
+    run: RunState, 
+    cfg: ModelConfig, 
+    message: str, 
+    file_like: Optional[io.BytesIO], 
+    filename: Optional[str], 
+    extracted_text: Optional[str],
+    loop: asyncio.AbstractEventLoop,
+    final_parts: list[str]
+) -> None:
+    """Stream response using native Anthropic provider.
+    
+    v2.4.0: Replaces msgmodel for Anthropic with direct SDK integration.
+    - Platform usage: botchat's API key
+    - BYOK usage: User's API key
+    
+    Privacy note: Anthropic does NOT use API data for training by default.
+    Data may be retained up to 30 days for trust & safety monitoring.
+    """
+    def _run_anthropic_thread():
+        max_retries = 3
+        retry_count = 0
+        max_tokens_to_use = cfg.max_tokens or 4096
+        
+        # Determine which key to use (None = platform key)
+        api_key = cfg.provider_key  # None for platform, user key for BYOK
+        
+        while retry_count <= max_retries:
+            try:
+                # Build effective message with any extracted text (PDFs)
+                effective_message = message
+                if extracted_text:
+                    effective_message = f"{extracted_text}\n\n---\n\n[User Query]\n{message}"
+                    logger.debug("Using extracted text (%d chars) for Anthropic", len(extracted_text))
+                
+                # Build file data for native provider (images only)
+                file_data = None
+                if file_like and filename:
+                    file_like.seek(0)
+                    file_bytes = file_like.read()
+                    mime_type = _get_mime_type(filename)
+                    
+                    # Anthropic only supports images natively, PDFs are text-extracted
+                    if mime_type.startswith("image/"):
+                        file_data = [{"bytes": file_bytes, "mime_type": mime_type, "name": filename}]
+                        logger.debug("Image prepared for Anthropic: %s (%s, %d bytes)", 
+                                   filename, mime_type, len(file_bytes))
+                    else:
+                        logger.debug("Non-image file %s handled via text extraction", filename)
+                
+                logger.debug("Calling native Anthropic provider: model=%s, backend=%s (attempt %d/%d)",
+                           cfg.model, "byok" if api_key else "platform", 
+                           retry_count + 1, max_retries + 1)
+                
+                final_parts.clear()
+                for chunk in stream_anthropic(
+                    message=effective_message,
+                    model=cfg.model,
+                    api_key=api_key,
+                    system_instruction=cfg.system if cfg.system else None,
+                    max_tokens=max_tokens_to_use,
+                    file_data=file_data,
+                ):
+                    final_parts.append(chunk)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                    )
+                
+                final = "".join(final_parts).strip()
+                run.finals[cfg.id] = final
+                
+                if cfg.id in run.platform_key_configs:
+                    run.successful_platform_configs.append(cfg.id)
+                
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_final", {"config_id": cfg.id, "final": final}),
+                )
+                return  # Success
+                
+            except AnthropicRateLimitError as e:
+                if retry_count < max_retries:
+                    wait_time = 2 ** retry_count
+                    retry_count += 1
+                    logger.warning("Rate limited on Anthropic. Retrying in %ds (attempt %d/%d). Error: %s",
+                                 wait_time, retry_count, max_retries, str(e))
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    error_msg = f"Rate limited after {retry_count} retries: {str(e)}"
+                    logger.error("Anthropic rate limit exceeded: %s", error_msg)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                    )
+                    return
+                    
+            except AnthropicAPIError as e:
+                error_msg = str(e)
+                logger.error("Anthropic API error: %s", error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                )
+                return
+                
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error("Unexpected error in Anthropic stream: %s", error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                )
+                return
+    
+    try:
+        await asyncio.to_thread(_run_anthropic_thread)
+        final = run.finals.get(cfg.id, "")
+        if not final:
             await publish(run, "panel_final", {"config_id": cfg.id, "final": final})
     except Exception as e:
         await publish(run, "panel_error", {"config_id": cfg.id, "error": str(e)})
@@ -827,7 +942,7 @@ async def run_fanout(run: RunState, configs: List[ModelConfig], message: str, ma
                         )
                         logger.debug("Single file: %s, native_support=%s, extracted_text=%s", filename, file_like is not None, extracted_text is not None)
                 
-                await msgmodel_stream_one(run, cfg, message, file_like, file_name, extracted_text)
+                await stream_to_provider(run, cfg, message, file_like, file_name, extracted_text)
 
         tasks = [asyncio.create_task(guarded(cfg)) for cfg in configs]
         await asyncio.gather(*tasks)
@@ -1247,36 +1362,3 @@ async def synthesize(run_id: str, req: SynthesizeRequest, api_key=Depends(requir
 
     asyncio.create_task(fake_synthesize(run, req))
     return {"ok": True}
-
-def build_config(cfg: ModelConfig):
-    """Build a msgmodel provider config from UI selection.
-    
-    v2.2.0: Gemini now uses native provider (not msgmodel).
-    This function handles OpenAI and Anthropic only.
-    
-    API Key Priority:
-    1. Client-provided key (decrypted from localStorage, sent with request)
-    2. Server environment variable (fallback for shared/demo mode)
-    
-    Client-provided keys are NEVER stored server-side - they exist only in memory
-    for the duration of the request.
-    """
-    p = cfg.provider.lower()
-    
-    # Priority 1: Client-provided key (from localStorage, decrypted client-side)
-    # Priority 2: Server environment variable (fallback)
-    provider_key = cfg.provider_key or get_provider_key_for_use(API_KEY, p)
-    
-    if p == "openai":
-        # OpenAI: X-OpenAI-No-Store header added automatically.
-        # ZDR guarantee: Request content NOT used for training or service improvement.
-        if provider_key:
-            return OpenAIConfig(model=cfg.model, api_key=provider_key)
-        return OpenAIConfig(model=cfg.model)
-    if p == "anthropic":
-        # Anthropic: By default, user conversations are not used for training.
-        if provider_key:
-            return AnthropicConfig(model=cfg.model, api_key=provider_key)
-        return AnthropicConfig(model=cfg.model)
-    # Gemini is handled by native provider in _stream_gemini_native()
-    return None
