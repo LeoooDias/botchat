@@ -16,6 +16,7 @@
 	const dispatch = createEventDispatcher<{
 		openSignIn: void;
 		openSettings: void;
+		openAbout: void;
 		toggleModifier: void;
 		exportChat: void;
 		clearChat: void;
@@ -67,10 +68,14 @@
 	{/if}
 	
 	<div class="flex items-center justify-between px-3 py-2">
-		<!-- Left: Logo -->
-		<div class="flex items-center">
+		<!-- Left: Logo (tap to open About) -->
+		<button
+			on:click={() => dispatch('openAbout')}
+			class="flex items-center"
+			aria-label="About botchat"
+		>
 			<h1 class="text-lg font-bold">botchat</h1>
-		</div>
+		</button>
 
 		<!-- Center: Chat name (truncated) - clickable for chat menu -->
 		<button

@@ -1926,6 +1926,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		isQuotaExhausted={$isQuotaExhausted}
 		on:openSignIn={() => (signInOpen = true)}
 		on:openSettings={() => (settingsOpen = true)}
+		on:openAbout={() => (aboutOpen = true)}
 		on:toggleModifier={toggleResponseModifier}
 		on:exportChat={exportConversation}
 		on:clearChat={showClearConvConfirmation}
