@@ -124,6 +124,8 @@
 	let newBotFormOpen = true; // New Bot Form collapsible state
 	let attachmentsOpen = true; // Attachments section collapsible state
 	let clearConvConfirmOpen = false; // Clear conversation confirmation modal
+	let closeChatConfirmOpen = false; // Close chat confirmation modal
+	let chatToClose: string | null = null; // ID of chat pending close confirmation
 	let duplicateNameErrorOpen = false; // Duplicate conversation name error modal
 	let exportModalOpen = false; // Export options modal
 	let importConfirmOpen = false; // Import confirmation modal
@@ -483,6 +485,35 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		saveConversations();
 	}
 
+	function confirmCloseChat(conversationId: string) {
+		const conv = conversations.find(c => c.id === conversationId);
+		const convMessages = conversationMessages[conversationId] || [];
+		const hasMessages = convMessages.length > 0;
+		const hasBots = conv?.activeBots && conv.activeBots.length > 0;
+		
+		if (hasMessages || hasBots) {
+			// Show confirmation modal
+			chatToClose = conversationId;
+			closeChatConfirmOpen = true;
+		} else {
+			// No messages or bots, delete directly
+			deleteConversation(conversationId);
+		}
+	}
+
+	function executeCloseChat() {
+		if (chatToClose) {
+			deleteConversation(chatToClose);
+			chatToClose = null;
+		}
+		closeChatConfirmOpen = false;
+	}
+
+	function cancelCloseChat() {
+		chatToClose = null;
+		closeChatConfirmOpen = false;
+	}
+
 	function deleteConversation(conversationId: string) {
 		// Clear messages for this conversation from sessionStorage
 		clearConversationMessages(conversationId);
@@ -814,7 +845,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	}
 
 	function handleMobileConversationDelete(id: string) {
-		deleteConversation(id);
+		confirmCloseChat(id);
 	}
 
 	function handleMobileConversationRename(detail: { id: string; name: string }) {
@@ -2170,7 +2201,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 							</span>
 						{/if}
 						<button
-							on:click|stopPropagation={() => deleteConversation(conv.id)}
+							on:click|stopPropagation={() => confirmCloseChat(conv.id)}
 							class="ml-1 text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-sm leading-none"
 							title="Delete chat"
 						>
@@ -2443,6 +2474,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	{theme}
 	{botCountsByProvider}
 	isAuthenticated={$isAuthenticated}
+	currentUser={$auth.user}
 	bind:globalMaxTokens
 	onExportConfig={exportConfig}
 	onImportConfig={importConfig}
@@ -2749,6 +2781,20 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		<GlobalAttachment bind:files={globalAttachments} bind:hasOversizedFiles={hasOversizedAttachments} />
 	</div>
 </SlidePanel>
+
+<!-- Close Chat Confirmation Modal -->
+<AlertModal
+	bind:isOpen={closeChatConfirmOpen}
+	title="Close Chat?"
+	message="Messages will be lost and bots will be removed from this chat."
+	type="warning"
+	confirmText="Close Chat"
+	cancelText="Cancel"
+	showCancel={true}
+	on:confirm={executeCloseChat}
+	on:cancel={cancelCloseChat}
+	on:close={cancelCloseChat}
+/>
 
 <!-- Global Alert Modal -->
 <AlertModal

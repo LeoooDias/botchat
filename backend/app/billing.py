@@ -99,23 +99,22 @@ class BillingConfigResponse(BaseModel):
 async def get_or_create_stripe_customer(user: UserInfo) -> str:
     """Get or create a Stripe customer for the user.
     
-    Uses email-based account linking to find existing customers.
-    This allows users to share a subscription across OAuth providers.
+    Users are identified by {provider}:{oauth_id}, not email.
+    Subscriptions are tied to the OAuth provider used to sign in.
     """
-    # Check if user exists in database (with email-based linking)
+    # Check if user exists in database
     db_user = await get_user_for_billing(user.provider, user.user_id, user.email)
     
     if db_user and db_user.get("stripe_customer_id"):
         logger.info(
-            "Found existing Stripe customer %s for %s (via %s)",
-            db_user["stripe_customer_id"], user.email, db_user["oauth_provider"]
+            "Found existing Stripe customer %s for %s:%s",
+            db_user["stripe_customer_id"], user.provider, user.user_id
         )
         return db_user["stripe_customer_id"]
     
-    # Ensure user exists in database (create_user also does email linking)
+    # Ensure user exists in database
     if not db_user:
         db_user = await create_user(user.provider, user.user_id, user.email)
-        # Re-check if the linked user has a Stripe customer
         if db_user and db_user.get("stripe_customer_id"):
             return db_user["stripe_customer_id"]
     
@@ -132,10 +131,8 @@ async def get_or_create_stripe_customer(user: UserInfo) -> str:
     
     customer = stripe.Customer.create(**customer_params)
     
-    # Update user with Stripe customer ID (use db_user's provider if linked)
-    update_provider = db_user["oauth_provider"] if db_user else user.provider
-    update_oauth_id = db_user["oauth_id"] if db_user else user.user_id
-    await update_user_stripe_customer(update_provider, update_oauth_id, customer.id)
+    # Update user with Stripe customer ID
+    await update_user_stripe_customer(user.provider, user.user_id, customer.id)
     
     return customer.id
 
@@ -171,7 +168,7 @@ async def get_billing_config():
 
 @router.get("/status", response_model=SubscriptionStatusResponse)
 async def get_status(user: UserInfo = Depends(require_auth)):
-    """Get current user's subscription status (with email-based account linking)."""
+    """Get current user's subscription status."""
     status = await get_subscription_status(user.provider, user.user_id, user.email)
     return SubscriptionStatusResponse(**status)
 
@@ -226,7 +223,7 @@ async def create_portal_session(user: UserInfo = Depends(require_auth)):
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Billing not configured")
     
-    # Get user's Stripe customer ID (with email-based account linking)
+    # Get user's Stripe customer ID
     db_user = await get_user_for_billing(user.provider, user.user_id, user.email)
     
     if not db_user or not db_user.get("stripe_customer_id"):

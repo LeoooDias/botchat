@@ -187,65 +187,38 @@ async def get_user_by_stripe_customer(customer_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
-async def get_user_by_email(email: str) -> Optional[dict]:
-    """Get user by email address (for linking OAuth accounts)."""
-    if not _pool or not email:
-        return None
-    
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, oauth_provider, oauth_id, email, stripe_customer_id,
-                   subscription_status, subscription_id, subscription_ends_at,
-                   encryption_key, message_quota_used, quota_period_start,
-                   created_at, updated_at
-            FROM users
-            WHERE LOWER(email) = LOWER($1)
-            """,
-            email
-        )
-        return dict(row) if row else None
+# NOTE: get_user_by_email removed - accounts are now tied to {provider}:{oauth_id}
+# Users who sign in with GitHub vs Google are separate accounts, even with same email.
+# This avoids the complexity of email-based linking and orphaned subscriptions
+# when users change their email address.
 
 
 async def get_user_for_billing(provider: str, oauth_id: str, email: Optional[str] = None) -> Optional[dict]:
-    """Get user for billing purposes, with email-based account linking.
+    """Get user for billing purposes by exact OAuth identity.
     
-    Lookup order:
-    1. Exact OAuth match (provider + oauth_id)
-    2. Email match (if provided) - allows sharing subscription across OAuth providers
+    Users are identified by {provider}:{oauth_id} - no email-based linking.
+    Signing in with GitHub creates a different account than signing in with Google,
+    even if the email address is the same. This ensures:
+    - Provider IDs are permanent (emails can change)
+    - No orphaned subscriptions when users change email
+    - Clear mental model: "sign in with the provider you subscribed with"
     
-    This ensures users can sign in via GitHub OR Google and access the same subscription.
+    The email parameter is accepted but ignored (kept for API compatibility).
     """
-    # First try exact OAuth match
-    user = await get_user_by_oauth(provider, oauth_id)
-    if user:
-        return user
-    
-    # Try email match (allows cross-provider subscription access)
-    if email:
-        user = await get_user_by_email(email)
-        if user:
-            logger.info(
-                "Billing lookup: %s via %s found existing account by email (provider: %s)",
-                email, provider, user['oauth_provider']
-            )
-            return user
-    
-    return None
+    return await get_user_by_oauth(provider, oauth_id)
 
 
 async def create_user(provider: str, oauth_id: str, email: Optional[str] = None) -> dict:
-    """Create a new user, or return existing user by email.
+    """Create a new user or return existing user by OAuth identity.
     
-    Email-based account linking:
-    - If a user with this email already exists, return that user (keeps subscription)
-    - This allows users to sign in with GitHub OR Google and share the same account
-    - The original OAuth provider/id is preserved (first one registered)
+    Users are uniquely identified by {provider}:{oauth_id}.
+    No email-based linking - GitHub and Google logins are separate accounts.
+    This ensures subscriptions are tied to stable provider IDs, not mutable emails.
     """
     if not _pool:
         raise RuntimeError("Database not initialized")
     
-    # First, check if this exact OAuth identity exists
+    # Check if this exact OAuth identity exists
     existing = await get_user_by_oauth(provider, oauth_id)
     if existing:
         # Same provider + ID, just update email if needed
@@ -266,18 +239,6 @@ async def create_user(provider: str, oauth_id: str, email: Optional[str] = None)
                 provider, oauth_id, email, generate_encryption_key()
             )
             return dict(row)
-    
-    # Check if a user with this email already exists (different provider)
-    # Return existing user to share subscription across OAuth providers
-    if email:
-        existing_by_email = await get_user_by_email(email)
-        if existing_by_email:
-            logger.info(
-                "Email linking: %s signing in via %s, found existing account (provider: %s)",
-                email, provider, existing_by_email['oauth_provider']
-            )
-            # Return existing user - they share the subscription!
-            return existing_by_email
     
     # No existing user - create new with encryption key
     async with _pool.acquire() as conn:
@@ -348,16 +309,15 @@ async def update_subscription_status(
 
 
 async def get_subscription_status(provider: str, oauth_id: str, email: Optional[str] = None) -> dict:
-    """Get user's subscription status with email-based account linking.
+    """Get user's subscription status by OAuth identity.
     
     Returns a dict with:
     - status: 'none' | 'trialing' | 'active' | 'canceled' | 'past_due'
     - is_subscribed: bool (true if trialing or active)
     - ends_at: Optional datetime
     
-    Uses email-based lookup to allow subscription sharing across OAuth providers.
+    Users are identified by {provider}:{oauth_id}. Email parameter is ignored.
     """
-    # Use email-aware lookup for cross-provider subscription access
     user = await get_user_for_billing(provider, oauth_id, email)
     
     if not user:

@@ -37,12 +37,17 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (!isOpen) return;
+		
 		if (e.key === 'Escape') {
 			if (showCancel) {
 				handleCancel();
 			} else {
 				handleConfirm();
 			}
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			handleConfirm();
 		}
 	}
 

@@ -213,12 +213,14 @@
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
 									<p><strong>For user management and billing, botchat stores:</strong></p>
 									<ul class="list-disc list-inside ml-2 space-y-1">
-										<li><strong>Email address:</strong> Your primary account identifier (when provided by your OAuth provider)</li>
+										<li><strong>OAuth identity:</strong> Your sign-in provider (GitHub/Google) and provider-issued ID</li>
+										<li><strong>Email address:</strong> For account reference (when provided by your OAuth provider)</li>
 										<li><strong>Sign-up date:</strong> When you created your account</li>
 										<li><strong>Message count:</strong> How many messages you've sent using our keys during the current billing period</li>
 										<li><strong>Subscription details:</strong> Your plan status and subscription expiration (if applicable)</li>
 									</ul>
-									<p><strong>Email-based account linking:</strong> Your account is tied to your email address, not your OAuth provider. If you sign in with GitHub one day and Google the next—using the same email—you'll access the same account and subscription. This means you can switch sign-in methods without losing your subscription or quota.</p>
+									<p><strong>One provider = one account:</strong> Your account is tied to your sign-in method, not your email address. If you sign in with GitHub, that creates a GitHub account. If you sign in with Google, that's a separate Google account—even if the email is the same. This design uses stable provider IDs (which never change) rather than email addresses (which can change and cause issues).</p>
+									<p><strong>Important:</strong> Always sign in with the same provider you used to subscribe. Your subscription is linked to that specific sign-in method.</p>
 									<p><strong>What this means:</strong> We store the minimum data required to authenticate you and manage billing/quotas. We don't even store your name. We do <em>not</em> store your chats, prompts, attachments, bot configurations, or any conversation content—that lives only in your browser.</p>
 								</div>
 							</details>
