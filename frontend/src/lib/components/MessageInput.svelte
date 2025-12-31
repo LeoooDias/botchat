@@ -9,6 +9,7 @@
 	export let globalAttachments: File[] = [];
 	export let currentMessage = ''; // Bound to parent for token estimation
 	export let hasOversizedAttachments = false; // Block sending if true
+	export let hasInvalidActiveBots = false; // Block sending if any bot has invalid model
 
 	const dispatch = createEventDispatcher<{ send: string }>();
 
@@ -47,10 +48,13 @@
 		return Math.ceil(avgSystemInstructionLength / 4) + Math.ceil(totalText.length / 4) + attachmentTokens;
 	}
 
+	// Can send if: has message, has valid bots, no oversized attachments, no invalid bots
+	$: canSend = currentMessage.trim() && botsCount > 0 && !hasOversizedAttachments && !hasInvalidActiveBots;
+
 	function handleSendOrCancel() {
 		if (isLoading && onCancel) {
 			onCancel();
-		} else if (currentMessage.trim() && botsCount > 0 && !hasOversizedAttachments) {
+		} else if (canSend) {
 			dispatch('send', currentMessage);
 			currentMessage = '';
 			estimatedTokens = 0;
@@ -97,46 +101,49 @@
 </script>
 
 <div class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 md:p-3 md:rounded-b-lg">
-	<div class="flex items-start border border-gray-300 dark:border-gray-600 rounded-xl md:rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 overflow-hidden bg-gray-50 dark:bg-gray-700">
-		<textarea
-			bind:this={inputElement}
-			bind:value={currentMessage}
-			on:input={autoResize}
-			on:keydown={handleKeydown}
-			disabled={isLoading || botsCount === 0}
-			placeholder={botsCount === 0 ? 'Add bots first...' : 'Type a message...'}
-			rows="1"
-			class="flex-1 px-3 md:px-4 py-2.5 md:py-2 border-0 resize-none focus:outline-none focus:ring-0 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-base md:text-sm bg-transparent dark:text-white dark:placeholder-gray-400"
-		></textarea>
-		<div class="flex items-center pl-2 md:pl-3 gap-2">
+	<div class="flex items-end gap-2">
+		<!-- Input area -->
+		<div class="flex-1 flex items-start border border-gray-300 dark:border-gray-600 rounded-xl md:rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 overflow-hidden bg-gray-50 dark:bg-gray-700">
+			<textarea
+				bind:this={inputElement}
+				bind:value={currentMessage}
+				on:input={autoResize}
+				on:keydown={handleKeydown}
+				disabled={isLoading || botsCount === 0 || hasInvalidActiveBots}
+				placeholder={botsCount === 0 ? 'Add bots first...' : (hasInvalidActiveBots ? 'Fix bot models to continue...' : 'Type a message...')}
+				rows="1"
+				class="flex-1 px-3 md:px-4 py-2.5 md:py-2 border-0 resize-none focus:outline-none focus:ring-0 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-base md:text-sm bg-transparent dark:text-white dark:placeholder-gray-400"
+			></textarea>
 			<!-- Token count (hidden on mobile to save space) -->
 			{#if currentMessage.trim() && estimatedTokens > 0}
-				<div class="hidden md:block text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-					~{estimatedTokens.toLocaleString()}
+				<div class="hidden md:flex items-center pr-3 h-full">
+					<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+						~{estimatedTokens.toLocaleString()}
+					</span>
 				</div>
 			{/if}
-			<!-- Send/Cancel button -->
-			<button
-				on:click={handleSendOrCancel}
-				disabled={isLoading ? false : !currentMessage.trim() || botsCount === 0 || hasOversizedAttachments}
-				title={hasOversizedAttachments ? 'Remove oversized attachments (>50MB) to send' : ''}
-				class="touch-target flex items-center justify-center min-w-[44px] h-[44px] md:min-w-0 md:h-auto md:px-5 md:py-2 rounded-l-lg md:rounded-l-lg rounded-r-none font-medium text-sm transition whitespace-nowrap mobile-tap-highlight {isLoading
-					? 'bg-gray-200 dark:bg-gray-600 text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500'
-					: 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed'
-				}"
-			>
-				{#if isLoading}
-					<span class="hidden md:inline">Cancel</span>
-					<svg class="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-					</svg>
-				{:else}
-					<span class="hidden md:inline">Send</span>
-					<svg class="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-					</svg>
-				{/if}
-			</button>
 		</div>
+		<!-- Send/Cancel button - outside input container for better mobile UX -->
+		<button
+			on:click={handleSendOrCancel}
+			disabled={isLoading ? false : !canSend}
+			title={hasInvalidActiveBots ? 'Remove or fix bots with invalid models' : (hasOversizedAttachments ? 'Remove oversized attachments (>50MB) to send' : '')}
+			class="flex-shrink-0 flex items-center justify-center w-11 h-11 md:w-auto md:h-auto md:px-5 md:py-2 rounded-full md:rounded-lg font-medium text-sm transition whitespace-nowrap {isLoading
+				? 'bg-gray-200 dark:bg-gray-600 text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500'
+				: 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed'
+			}"
+		>
+			{#if isLoading}
+				<span class="hidden md:inline">Cancel</span>
+				<svg class="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+				</svg>
+			{:else}
+				<span class="hidden md:inline">Send</span>
+				<svg class="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+				</svg>
+			{/if}
+		</button>
 	</div>
 </div>

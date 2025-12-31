@@ -9,7 +9,7 @@ describe('NewBotForm Component Logic', () => {
 	// Test data setup
 	const providers = [
 		{ name: 'OpenAI', value: 'openai', models: ['gpt-5.2', 'gpt-5', 'gpt-4.1', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'] },
-		{ name: 'Google', value: 'gemini', models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'] }
+		{ name: 'Google', value: 'gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'] }
 	];
 
 	it('should have correct OpenAI model list', () => {
@@ -21,8 +21,8 @@ describe('NewBotForm Component Logic', () => {
 
 	it('should have correct Gemini model list', () => {
 		const gemini = providers.find(p => p.value === 'gemini');
-		expect(gemini?.models).toHaveLength(5);
-		expect(gemini?.models).toContain('gemini-3-pro-preview');
+		expect(gemini?.models).toHaveLength(3);
+		expect(gemini?.models).toContain('gemini-2.5-flash');
 	});
 
 	it('should validate bot name', () => {

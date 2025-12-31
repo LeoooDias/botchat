@@ -18,9 +18,20 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
-from msgmodel import stream, stream_panels, OpenAIConfig, GeminiConfig, AnthropicConfig
-from msgmodel.providers import OpenAIProvider, GeminiProvider, AnthropicProvider
+# msgmodel: Used for OpenAI and Anthropic (v2.2.0)
+# Gemini migrated to native providers module
+from msgmodel import stream as msgmodel_stream, OpenAIConfig, AnthropicConfig
+from msgmodel.providers import OpenAIProvider, AnthropicProvider
 from pypdf import PdfReader
+
+# Native Gemini provider (Vertex AI + AI Studio)
+from app.providers.gemini import (
+    GeminiProvider as NativeGeminiProvider,
+    stream_gemini,
+    get_gemini_privacy_info,
+    GeminiAPIError,
+    RateLimitError as GeminiRateLimitError,
+)
 
 # Key management
 from app.key_storage import (
@@ -204,8 +215,12 @@ def prepare_file_for_provider(
         return file_like, filename, None
 
 
-def get_privacy_info(provider: str) -> Optional[Dict[str, Any]]:
+def get_privacy_info(provider: str, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get privacy metadata for a provider.
+    
+    Args:
+        provider: Provider name (openai, gemini, anthropic)
+        api_key: For Gemini, determines if using Vertex AI (None) or AI Studio (key)
     
     Returns privacy info dict or None if provider is unknown.
     """
@@ -215,7 +230,9 @@ def get_privacy_info(provider: str) -> Optional[Dict[str, Any]]:
         if provider_lower == "openai":
             return OpenAIProvider.get_privacy_info()
         elif provider_lower == "gemini":
-            return GeminiProvider.get_privacy_info()
+            # v2.2.0: Use native Gemini provider for privacy info
+            # Returns different info based on backend (Vertex AI vs AI Studio)
+            return get_gemini_privacy_info(api_key=api_key)
         elif provider_lower == "anthropic":
             return AnthropicProvider.get_privacy_info()
         else:
@@ -418,6 +435,35 @@ def sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+def _get_mime_type(filename: str) -> str:
+    """Get MIME type from filename extension.
+    
+    Used for file attachments sent to AI providers.
+    """
+    ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+    mime_types = {
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'md': 'text/markdown',
+        'json': 'application/json',
+        'csv': 'text/csv',
+        'py': 'text/x-python',
+        'js': 'text/javascript',
+        'ts': 'text/typescript',
+        'html': 'text/html',
+        'css': 'text/css',
+        'xml': 'application/xml',
+        'yaml': 'application/yaml',
+        'yml': 'application/yaml',
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+    }
+    return mime_types.get(ext, 'application/octet-stream')
+
+
 async def publish(run: RunState, event: str, data: Any) -> None:
     await run.queue.put(sse(event, data))
 
@@ -429,10 +475,9 @@ async def publish(run: RunState, event: str, data: Any) -> None:
 async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, file_like: Optional[io.BytesIO] = None, filename: Optional[str] = None, extracted_text: Optional[str] = None) -> None:
     """Stream one provider's response to a message (optionally with attachment).
     
-    msgmodel v4.0.1 uses in-memory BytesIO for all file uploads, eliminating:
-    - Server-side file persistence (privacy-first)
-    - OpenAI Files API cleanup complexity
-    - Stateful file management
+    v2.2.0 ARCHITECTURE:
+    - Gemini: Native provider via Vertex AI (platform) or AI Studio (BYOK)
+    - OpenAI/Anthropic: Still using msgmodel (migration in v2.3.0/v2.4.0)
     
     For PDFs with OpenAI: extracted_text contains the PDF text content, used instead of file_like.
     
@@ -441,10 +486,9 @@ async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, fil
     """
     await publish(run, "panel_start", {"config_id": cfg.id})
 
-    config_obj = build_config(cfg)
-    
     # Fetch and send privacy metadata for this provider
-    privacy_info = get_privacy_info(cfg.provider)
+    # For Gemini, pass api_key to determine Vertex AI vs AI Studio privacy info
+    privacy_info = get_privacy_info(cfg.provider, api_key=cfg.provider_key)
     await publish(run, "panel_privacy", {
         "config_id": cfg.id,
         "privacy": privacy_info
@@ -452,7 +496,152 @@ async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, fil
 
     loop = asyncio.get_running_loop()
     final_parts: list[str] = []
+    
+    # Route to appropriate streaming implementation
+    provider_lower = cfg.provider.lower()
+    
+    if provider_lower == "gemini":
+        # v2.2.0: Native Gemini provider (Vertex AI or AI Studio)
+        await _stream_gemini_native(run, cfg, message, file_like, filename, extracted_text, loop, final_parts)
+    else:
+        # OpenAI and Anthropic: Use msgmodel (v2.3.0/v2.4.0 will migrate these)
+        config_obj = build_config(cfg)
+        await _stream_via_msgmodel(run, cfg, message, file_like, filename, extracted_text, loop, final_parts, config_obj)
 
+
+async def _stream_gemini_native(
+    run: RunState, 
+    cfg: ModelConfig, 
+    message: str, 
+    file_like: Optional[io.BytesIO], 
+    filename: Optional[str], 
+    extracted_text: Optional[str],
+    loop: asyncio.AbstractEventLoop,
+    final_parts: list[str]
+) -> None:
+    """Stream response using native Gemini provider (Vertex AI or AI Studio).
+    
+    v2.2.0: Replaces msgmodel for Gemini with direct SDK integration.
+    - Platform usage: Vertex AI with service account
+    - BYOK usage: AI Studio with user's API key
+    """
+    def _run_gemini_thread():
+        max_retries = 3
+        retry_count = 0
+        max_tokens_to_use = cfg.max_tokens or 4000
+        
+        # Determine which key to use (None = platform/Vertex AI)
+        api_key = cfg.provider_key  # None for platform, user key for BYOK
+        
+        while retry_count <= max_retries:
+            try:
+                # Build effective message with any extracted text
+                effective_message = message
+                if extracted_text:
+                    effective_message = f"{extracted_text}\n\n---\n\n[User Query]\n{message}"
+                    logger.debug("Using extracted text (%d chars) for Gemini", len(extracted_text))
+                
+                # Build file data for native provider
+                file_data = None
+                if file_like and filename:
+                    file_like.seek(0)
+                    file_bytes = file_like.read()
+                    # Determine MIME type from filename
+                    mime_type = _get_mime_type(filename)
+                    file_data = [{"bytes": file_bytes, "mime_type": mime_type, "name": filename}]
+                    logger.debug("File prepared for Gemini: %s (%s, %d bytes)", 
+                               filename, mime_type, len(file_bytes))
+                
+                logger.debug("Calling native Gemini provider: model=%s, backend=%s (attempt %d/%d)",
+                           cfg.model, "ai_studio" if api_key else "vertex_ai", 
+                           retry_count + 1, max_retries + 1)
+                
+                final_parts.clear()
+                for chunk in stream_gemini(
+                    message=effective_message,
+                    model=cfg.model,
+                    api_key=api_key,
+                    system_instruction=cfg.system if cfg.system else None,
+                    max_tokens=max_tokens_to_use,
+                    file_data=file_data,
+                ):
+                    final_parts.append(chunk)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                    )
+                
+                final = "".join(final_parts).strip()
+                run.finals[cfg.id] = final
+                
+                if cfg.id in run.platform_key_configs:
+                    run.successful_platform_configs.append(cfg.id)
+                
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_final", {"config_id": cfg.id, "final": final}),
+                )
+                return  # Success
+                
+            except GeminiRateLimitError as e:
+                if retry_count < max_retries:
+                    wait_time = 2 ** retry_count
+                    retry_count += 1
+                    logger.warning("Rate limited on Gemini. Retrying in %ds (attempt %d/%d). Error: %s",
+                                 wait_time, retry_count, max_retries, str(e))
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    error_msg = f"Rate limited after {retry_count} retries: {str(e)}"
+                    logger.error("Gemini rate limit exceeded: %s", error_msg)
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                    )
+                    return
+                    
+            except GeminiAPIError as e:
+                error_msg = str(e)
+                logger.error("Gemini API error: %s", error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                )
+                return
+                
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error("Unexpected error in Gemini stream: %s", error_msg, exc_info=True)
+                loop.call_soon_threadsafe(
+                    run.queue.put_nowait,
+                    sse("panel_error", {"config_id": cfg.id, "error": error_msg}),
+                )
+                return
+    
+    try:
+        await asyncio.to_thread(_run_gemini_thread)
+        final = run.finals.get(cfg.id, "")
+        if not final:
+            await publish(run, "panel_final", {"config_id": cfg.id, "final": final})
+    except Exception as e:
+        await publish(run, "panel_error", {"config_id": cfg.id, "error": str(e)})
+
+
+async def _stream_via_msgmodel(
+    run: RunState, 
+    cfg: ModelConfig, 
+    message: str, 
+    file_like: Optional[io.BytesIO], 
+    filename: Optional[str], 
+    extracted_text: Optional[str],
+    loop: asyncio.AbstractEventLoop,
+    final_parts: list[str],
+    config_obj: Any
+) -> None:
+    """Stream response using msgmodel (OpenAI and Anthropic).
+    
+    This will be replaced in v2.3.0 (Anthropic) and v2.4.0 (OpenAI).
+    """
     def _run_in_thread():
         # msgmodel.stream(provider, message, config, system_instruction, file_like, filename)
         # 
@@ -509,7 +698,7 @@ async def msgmodel_stream_one(run: RunState, cfg: ModelConfig, message: str, fil
                            cfg.provider.lower(), list(stream_kwargs.keys()), retry_count + 1, max_retries + 1)
                 
                 final_parts.clear()  # Clear previous attempt if retrying
-                for chunk in stream(cfg.provider.lower(), effective_message, **stream_kwargs):
+                for chunk in msgmodel_stream(cfg.provider.lower(), effective_message, **stream_kwargs):
                     final_parts.append(chunk)
                     # Push token to the SSE queue on the event loop thread
                     loop.call_soon_threadsafe(
@@ -737,8 +926,13 @@ async def auth_callback(req: OAuthCallbackRequest):
     different OAuth provider), they are linked to the same account. This
     ensures subscriptions work across login methods.
     """
+    from app.auth import check_email_allowed
+    
     # Get user info from OAuth provider
     user = await exchange_oauth_code(req)
+    
+    # Check email allowlist (if configured)
+    check_email_allowed(user.email)
     
     # Create or link user account in database (links by email if exists)
     try:
@@ -1057,9 +1251,8 @@ async def synthesize(run_id: str, req: SynthesizeRequest, api_key=Depends(requir
 def build_config(cfg: ModelConfig):
     """Build a msgmodel provider config from UI selection.
     
-    MSGMODEL v3.2.8+ PROVIDER SUPPORT:
-    - OpenAI: Zero Data Retention enforced (non-negotiable)
-    - Gemini: Paid tier only (abuse detection retention ~24-72 hours)
+    v2.2.0: Gemini now uses native provider (not msgmodel).
+    This function handles OpenAI and Anthropic only.
     
     API Key Priority:
     1. Client-provided key (decrypted from localStorage, sent with request)
@@ -1075,24 +1268,15 @@ def build_config(cfg: ModelConfig):
     provider_key = cfg.provider_key or get_provider_key_for_use(API_KEY, p)
     
     if p == "openai":
-        # OpenAI v3.2.0: X-OpenAI-No-Store header added automatically.
+        # OpenAI: X-OpenAI-No-Store header added automatically.
         # ZDR guarantee: Request content NOT used for training or service improvement.
-        # Metadata (timestamps, tokens) may persist ~30 days for debugging only.
         if provider_key:
             return OpenAIConfig(model=cfg.model, api_key=provider_key)
         return OpenAIConfig(model=cfg.model)
-    if p == "gemini":
-        # Gemini v3.2.0: Requires paid Cloud account with billing enabled.
-        # Free tier usage will retain data indefinitely for training (non-compliant).
-        # Paid tier: Data retained for abuse detection only (~24-72 hours).
-        if provider_key:
-            return GeminiConfig(model=cfg.model, api_key=provider_key)
-        return GeminiConfig(model=cfg.model)
     if p == "anthropic":
         # Anthropic: By default, user conversations are not used for training.
-        # Can optionally be logged for security purposes (opt-in).
-        # Enterprise plans available for zero data retention.
         if provider_key:
             return AnthropicConfig(model=cfg.model, api_key=provider_key)
         return AnthropicConfig(model=cfg.model)
+    # Gemini is handled by native provider in _stream_gemini_native()
     return None

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount } from 'svelte';
-	import { getMaxOutput } from '$lib/modelLimits';
+	import { getMaxOutput, isBotModelValid, validateBotModel } from '$lib/modelLimits';
 	import AlertModal from './AlertModal.svelte';
 	import { getUserItem, setUserItem, removeUserItem } from '$lib/utils/userStorage';
 
@@ -30,7 +30,7 @@
 	
 	const providers = [
 		{ name: 'Anthropic', value: 'anthropic', models: ['claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-opus-4-5'] },
-		{ name: 'Google', value: 'gemini', models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'] },
+		{ name: 'Google', value: 'gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'] },
 		{ name: 'OpenAI', value: 'openai', models: ['gpt-5.2', 'gpt-5', 'gpt-5-nano','gpt-4.1', 'gpt-5-mini'] }
 	];
 	
@@ -428,6 +428,19 @@
 
 	// Get ordered category names (Uncategorized first, then custom categories alphabetically)
 	$: orderedCategories = [UNCATEGORIZED, ...categories.map(c => c.name).filter(name => name !== UNCATEGORIZED).sort()];
+
+	// Count bots with invalid models per category
+	$: invalidBotsPerCategory = (() => {
+		const counts: Map<string, number> = new Map();
+		categorizedBots.forEach((bots, categoryName) => {
+			const invalidCount = bots.filter(bot => !isBotModelValid(bot)).length;
+			counts.set(categoryName, invalidCount);
+		});
+		return counts;
+	})();
+
+	// Total count of invalid bots
+	$: totalInvalidBots = savedBots.filter(bot => !isBotModelValid(bot)).length;
 </script>
 
 <div class="border-b dark:border-gray-700 pb-4">
@@ -562,8 +575,9 @@
 				{#each orderedCategories as categoryName}
 					{@const botsInCategory = categorizedBots.get(categoryName) || []}
 					{@const wouldExceedLimit = currentBotsInConversation + botsInCategory.length > maxBotsPerConversation}
+					{@const invalidCount = invalidBotsPerCategory.get(categoryName) || 0}
 					{#if botsInCategory.length > 0 || categoryName !== UNCATEGORIZED}
-							<div class="border border-gray-200 dark:border-gray-600 rounded overflow-hidden">
+							<div class="border rounded overflow-hidden {invalidCount > 0 ? 'border-red-400 dark:border-red-600' : 'border-gray-200 dark:border-gray-600'}">
 								<!-- Category Header -->
 								<div class="w-full flex items-center justify-between bg-gray-100 dark:bg-gray-700">
 									<button
@@ -583,6 +597,14 @@
 									{/if}
 									<span>{categoryName}</span>
 										<span class="text-gray-500 dark:text-gray-400">({botsInCategory.length})</span>
+										{#if invalidCount > 0}
+											<span class="text-red-500 dark:text-red-400 flex items-center gap-1" title="{invalidCount} bot{invalidCount > 1 ? 's' : ''} with invalid model">
+												<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+													<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+												</svg>
+												<span class="text-xs">{invalidCount}</span>
+											</span>
+										{/if}
 									</button>
 									<button
 										on:click={(e) => {
@@ -628,6 +650,8 @@
 									{:else}
 										{#each botsInCategory as bot (bot.id)}
 												{@const colors = getProviderColor(bot.provider)}
+												{@const botValid = isBotModelValid(bot)}
+												{@const validationError = validateBotModel(bot.provider, bot.model)}
 												<div 
 													role="button"
 													tabindex="0"
@@ -640,11 +664,23 @@
 														draggedBotId = null;
 														dragOverCategory = null;
 													}}
-													class="flex items-center justify-between {colors.bg} border {colors.border} rounded p-3 md:p-2 {colors.hoverBorder} transition cursor-move {draggedBotId === bot.id ? 'opacity-50' : ''}"
+													class="flex items-center justify-between {botValid ? colors.bg : 'bg-red-50 dark:bg-red-900/20'} border {botValid ? colors.border : 'border-red-400 dark:border-red-600 border-2'} rounded p-3 md:p-2 {botValid ? colors.hoverBorder : 'hover:border-red-500 dark:hover:border-red-500'} transition cursor-move {draggedBotId === bot.id ? 'opacity-50' : ''}"
+													title={botValid ? '' : validationError || 'Model no longer available'}
 												>
 												<div class="flex-1 min-w-0">
-													<p class="text-sm md:text-xs font-semibold text-gray-900 dark:text-white">{bot.name || bot.provider}</p>
-													<p class="text-sm md:text-xs text-gray-600 dark:text-gray-300 truncate">{bot.model}</p>
+													<div class="flex items-center gap-1">
+														{#if !botValid}
+															<svg class="w-4 h-4 text-red-500 dark:text-red-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+																{#if validationError}<title>{validationError}</title>{/if}
+																<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+															</svg>
+														{/if}
+														<p class="text-sm md:text-xs font-semibold {botValid ? 'text-gray-900 dark:text-white' : 'text-red-700 dark:text-red-300'}">{bot.name || bot.provider}</p>
+													</div>
+													<p class="text-sm md:text-xs {botValid ? 'text-gray-600 dark:text-gray-300' : 'text-red-600 dark:text-red-400 line-through'} truncate">{bot.model}</p>
+													{#if !botValid}
+														<p class="text-sm md:text-xs text-red-500 dark:text-red-400 font-medium">⚠ Update model</p>
+													{/if}
 													{#if bot.maxTokens}
 														<p class="text-sm md:text-xs text-blue-600 dark:text-blue-400">max_tokens: {bot.maxTokens}</p>
 													{/if}
@@ -652,9 +688,9 @@
 												<div class="flex gap-2 md:gap-1 ml-2 flex-shrink-0">
 													<button
 														on:click={() => addBot(bot)}
-														class="w-11 h-11 md:w-auto md:h-auto md:px-2 md:py-1 text-sm md:text-xs rounded transition flex items-center justify-center {canAddToConversation ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'}"
-														title={canAddToConversation ? 'Add to chat' : 'Chat bot limit reached'}
-														disabled={!canAddToConversation}
+														class="w-11 h-11 md:w-auto md:h-auto md:px-2 md:py-1 text-sm md:text-xs rounded transition flex items-center justify-center {canAddToConversation && botValid ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'}"
+														title={!botValid ? 'Edit bot to update model' : (canAddToConversation ? 'Add to chat' : 'Chat bot limit reached')}
+														disabled={!canAddToConversation || !botValid}
 													>
 														+
 													</button>
@@ -680,6 +716,21 @@
 												<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
 													<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-md mx-4">
 														<h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Edit Bot</h2>
+
+														<!-- Model validation warning -->
+														{#if !isBotModelValid(bot)}
+															<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg">
+																<div class="flex items-center gap-2 text-red-700 dark:text-red-300">
+																	<svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+																		<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+																	</svg>
+																	<span class="font-medium text-sm">Model no longer available</span>
+																</div>
+																<p class="mt-1 text-sm text-red-600 dark:text-red-400">
+																	Select a new model below to continue using this bot.
+																</p>
+															</div>
+														{/if}
 
 														<div class="space-y-4">
 															<!-- Bot Name -->
@@ -739,12 +790,14 @@
 																	</select>
 																</div>
 																<div>
-																	<label for="edit-model-{bot.id}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Model</label>
+																	<label for="edit-model-{bot.id}" class="block text-sm font-medium {!isBotModelValid(bot) ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'} mb-1">
+																		Model {#if !isBotModelValid(bot)}<span class="text-red-500">⚠</span>{/if}
+																	</label>
 																	<select
 																		id="edit-model-{bot.id}"
 																		value={bot.model}
 																		on:change={(e) => (bot.model = e.currentTarget.value)}
-																		class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+																		class="w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-inset dark:bg-gray-700 dark:text-white {!isBotModelValid(bot) ? 'border-red-400 dark:border-red-600 ring-2 ring-red-300 dark:ring-red-700 focus:ring-red-500' : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'}"
 																	>
 																		{#each (providers.find(p => p.value === bot.provider)?.models || []) as model}
 																			<option value={model}>{model}</option>

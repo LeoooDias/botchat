@@ -9,7 +9,7 @@ describe('ModelSelector Component Logic', () => {
 	// Test data setup
 	const providers = [
 		{ name: 'OpenAI', value: 'openai', models: ['gpt-5.2', 'gpt-5-mini', 'gpt-5-nano'] },
-		{ name: 'Google', value: 'gemini', models: ['gemini-3-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'] }
+		{ name: 'Google', value: 'gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'] }
 	];
 
 	it('should have OpenAI provider', () => {
@@ -33,7 +33,7 @@ describe('ModelSelector Component Logic', () => {
 
 	it('should list Gemini models', () => {
 		const gemini = providers.find(p => p.value === 'gemini');
-		expect(gemini?.models).toHaveLength(4);
+		expect(gemini?.models).toHaveLength(3);
 		expect(gemini?.models).toContain('gemini-2.5-flash');
 	});
 

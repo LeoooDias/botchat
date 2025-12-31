@@ -7,13 +7,18 @@ python-dotenv==1.2.1
 # Authentication (OAuth + JWT)
 python-jose[cryptography]>=3.3.0
 
-# AI providers via msgmodel (v3.2.8+ required for api_key in config)
+# AI Providers
+# v2.2.0: Gemini via native google-genai SDK (Vertex AI + AI Studio)
+# v2.3.0+: Will migrate Anthropic and OpenAI to native SDKs
+google-genai>=1.0.0
+
+# msgmodel: Used for OpenAI/Anthropic (v2.2.0), will be removed in v2.4.0
 msgmodel>=3.2.8
 
 # PDF support
 pypdf>=6.0.0
 
-# HTTP client (msgmodel dependency)
+# HTTP client
 httpx==0.28.1
 
 # Pydantic (FastAPI dependency)

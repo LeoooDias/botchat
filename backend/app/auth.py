@@ -13,7 +13,7 @@ Security model:
 import os
 import time
 import logging
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 from dataclasses import dataclass
 
 import httpx
@@ -41,6 +41,36 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 # Auth mode - disable for local development
 REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "false").lower() == "true"
 
+# Email allowlist - comma-separated list of allowed emails (empty = allow all)
+# Used to restrict access in dev environments
+_allowed_emails_raw = os.environ.get("ALLOWED_EMAILS", "")
+ALLOWED_EMAILS: set[str] = {
+    e.strip().lower() for e in _allowed_emails_raw.split(",") if e.strip()
+}
+
+
+def check_email_allowed(email: Optional[str]) -> None:
+    """Check if email is in allowlist (if configured).
+    
+    Raises HTTPException 403 if email is not allowed.
+    If ALLOWED_EMAILS is empty, all emails are allowed.
+    """
+    if not ALLOWED_EMAILS:
+        return  # No restriction
+    
+    if not email:
+        raise HTTPException(
+            status_code=403,
+            detail="Email required for authentication in this environment"
+        )
+    
+    if email.lower() not in ALLOWED_EMAILS:
+        logger.warning("Access denied for email: %s (not in allowlist)", email)
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied. This environment is restricted to authorized users only."
+        )
+
 
 # -----------------------------
 # Models
@@ -66,7 +96,7 @@ class OAuthCallbackRequest(BaseModel):
 class AuthResponse(BaseModel):
     """Response containing JWT and user info."""
     token: str
-    user: dict
+    user: dict[str, Any]
     expires_at: int
 
 
@@ -83,7 +113,7 @@ def create_jwt(user: UserInfo) -> Tuple[str, int]:
         raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
     
     expires_at = int(time.time()) + JWT_EXPIRY_SECONDS
-    payload = {
+    payload: dict[str, Any] = {
         "sub": f"{user.provider}:{user.user_id}",
         "provider": user.provider,
         "email": user.email,

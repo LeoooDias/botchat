@@ -14,6 +14,7 @@
 	import AboutModal from '$lib/components/AboutModal.svelte';
 	import AlertModal from '$lib/components/AlertModal.svelte';
 	import IntroModal from '$lib/components/IntroModal.svelte';
+	import EditBotDialog from '$lib/components/EditBotDialog.svelte';
 	// Mobile components
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import MobileHeader from '$lib/components/MobileHeader.svelte';
@@ -23,7 +24,7 @@
 	import { auth, isAuthenticated, isSessionValid, authToken, getAuthHeaders, authLoading, logout } from '$lib/stores/auth';
 	import { subscription, quota, tierLimits, isPaidUser, tierName, quotaStatus, isQuotaExhausted, quotaPercentage } from '$lib/stores/subscription';
 	import { providersStore, configuredProviderIds, getProviderDisplayName } from '$lib/stores/providers';
-	import { getContextWindow } from '$lib/modelLimits';
+	import { getContextWindow, isBotModelValid, validateBotModel } from '$lib/modelLimits';
 	import { getProviderKey, getConfiguredProviders, validateEncryptionKey } from '$lib/utils/keyEncryption';
 	import { getUserItem, setUserItem, removeUserItem, getGlobalItem, setGlobalItem, migrateUserData } from '$lib/utils/userStorage';
 	import { needsStarterConfig, getStarterBots, buildStarterConversation, STARTER_MESSAGE, type StarterBot } from '$lib/starterConfig';
@@ -110,6 +111,8 @@
 	let signInOpen = false; // Sign-in modal state
 	let aboutOpen = false; // About modal state
 	let introOpen = false; // Intro modal state (for new users)
+	let editBotDialogOpen = false; // Edit active bot dialog state
+	let editingActiveBot: Bot | null = null; // Bot being edited in the dialog
 	let theme: 'light' | 'dark' = 'light'; // Theme state
 	let summarizeOpen = false; // Summarize modal state
 	let isSummarizing = false; // Summarization in progress
@@ -225,6 +228,10 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	$: activeBots = currentConversation?.activeBots || [];
 	$: activeBotsExpanded = currentConversation?.activeBotsExpanded ?? true;
 	$: isStreaming = streamingCount > 0;  // True when responses are streaming in
+	
+	// Check if any active bot has an invalid model (for disabling Send button)
+	$: hasInvalidActiveBots = activeBots.some(bot => !isBotModelValid(bot));
+	$: invalidActiveBotsCount = activeBots.filter(bot => !isBotModelValid(bot)).length;
 	
 	// Fetch subscription status, quota, and provider config when auth state changes
 	$: if ($isAuthenticated) {
@@ -1042,6 +1049,30 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			conversations = conversations;
 			saveConversations();
 		}
+	}
+
+	function openEditActiveBot(bot: Bot) {
+		editingActiveBot = bot;
+		editBotDialogOpen = true;
+	}
+
+	function handleSaveActiveBot(event: CustomEvent<Bot>) {
+		const updatedBot = event.detail;
+		if (currentConversation && updatedBot) {
+			const index = currentConversation.activeBots.findIndex(b => b.id === updatedBot.id);
+			if (index >= 0) {
+				currentConversation.activeBots[index] = updatedBot;
+				conversations = conversations;
+				saveConversations();
+			}
+		}
+		editBotDialogOpen = false;
+		editingActiveBot = null;
+	}
+
+	function handleCancelEditActiveBot() {
+		editBotDialogOpen = false;
+		editingActiveBot = null;
 	}
 
 	function getSystemInstructionText(bot: Bot): string {
@@ -2299,12 +2330,13 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 					on:remove={(e) => removeBotFromConversation(e.detail)}
 					on:removeAll={removeAllBotsFromConversation}
 					on:toggle={toggleActiveBotsExpanded}
+					on:edit={(e) => openEditActiveBot(e.detail)}
 				/>
 			</div>
 			
 			<!-- Message Input (with bottom padding for mobile nav bar) -->
 			<div class="pb-mobile-nav md:pb-0">
-				<MessageInput on:send={(e: CustomEvent<string>) => sendMessage(e.detail)} {isLoading} botsCount={activeBots.length} onCancel={cancelMessage} {messages} {activeBots} {globalAttachments} hasOversizedAttachments={hasOversizedAttachments} bind:currentMessage={currentInputMessage} />
+				<MessageInput on:send={(e: CustomEvent<string>) => sendMessage(e.detail)} {isLoading} botsCount={activeBots.length} onCancel={cancelMessage} {messages} {activeBots} {globalAttachments} hasOversizedAttachments={hasOversizedAttachments} {hasInvalidActiveBots} bind:currentMessage={currentInputMessage} />
 			</div>
 			
 			<!-- Desktop Active Bots Bar -->
@@ -2333,13 +2365,24 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 							<div class="flex gap-2 flex-wrap">
 								{#each activeBots as bot (bot.id)}
 									{@const colors = getProviderColor(bot.provider)}
+									{@const botValid = isBotModelValid(bot)}
+									{@const validationError = validateBotModel(bot.provider, bot.model)}
 									<div 
-										class="relative group flex items-center gap-1 rounded px-2 py-1 flex-shrink-0 border transition-colors {colors.bg} {colors.border}"
+										class="relative group flex items-center gap-1 rounded px-2 py-1 flex-shrink-0 border-2 transition-colors {botValid ? colors.bg : 'bg-red-50 dark:bg-red-900/30'} {botValid ? colors.border : 'border-red-400 dark:border-red-600'}"
+										title={botValid ? 'Click to edit' : validationError || 'Model no longer available - click to fix'}
 									>
-										<div class="flex flex-col">
-											<span class="text-xs font-medium {colors.text}">{bot.name || bot.provider}</span>
-											<span class="text-[10px] {colors.subtext}">{bot.provider} • {bot.model}</span>
-										</div>
+										{#if !botValid}
+											<svg class="w-4 h-4 text-red-500 dark:text-red-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+												<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+											</svg>
+										{/if}
+										<button
+											on:click={() => openEditActiveBot(bot)}
+											class="flex flex-col text-left hover:opacity-80 transition"
+										>
+											<span class="text-xs font-medium {botValid ? colors.text : 'text-red-700 dark:text-red-300'}">{bot.name || bot.provider}</span>
+											<span class="text-[10px] {botValid ? colors.subtext : 'text-red-600 dark:text-red-400 line-through'}">{bot.provider} • {bot.model}</span>
+										</button>
 										<button
 											on:click={() => removeBotFromConversation(bot.id)}
 											class="ml-1 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 text-lg leading-none"
@@ -2350,8 +2393,14 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										<!-- Custom instant tooltip - uses fixed positioning to escape overflow -->
 										<div class="fixed z-[9999] invisible group-hover:visible opacity-0 group-hover:opacity-100 pointer-events-none -translate-y-full -translate-x-0 -mt-2"
 											 style="top: auto; bottom: auto;">
-											<div class="bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap shadow-lg">
+											<div class="{botValid ? 'bg-gray-900 dark:bg-gray-700' : 'bg-red-900 dark:bg-red-800'} text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap shadow-lg">
 												<div class="font-semibold">{bot.name || 'Unnamed Bot'}</div>
+												{#if !botValid}
+													<div class="text-red-300 mt-1 font-medium">⚠ Model no longer available</div>
+													<div class="text-red-200 text-[10px]">Click to update model</div>
+												{:else}
+													<div class="text-blue-300 text-[10px]">Click to edit</div>
+												{/if}
 												<div class="text-gray-300 mt-1">Provider: {bot.provider}</div>
 												<div class="text-gray-300">Model: {bot.model}</div>
 												<div class="text-gray-300">Max Tokens: {bot.maxTokens || globalMaxTokens}</div>
@@ -2377,6 +2426,14 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 
 <!-- Intro Modal (for new users) -->
 <IntroModal bind:isOpen={introOpen} on:ok={handleIntroOk} on:dismiss={handleIntroDismiss} />
+
+<!-- Edit Active Bot Dialog -->
+<EditBotDialog
+	bot={editingActiveBot}
+	bind:isOpen={editBotDialogOpen}
+	on:save={handleSaveActiveBot}
+	on:cancel={handleCancelEditActiveBot}
+/>
 
 <!-- Settings Modal -->
 <SettingsModal
