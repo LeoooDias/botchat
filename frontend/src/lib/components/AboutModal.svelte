@@ -142,7 +142,7 @@
 									</svg>
 								</summary>
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
-									<p>Free users: up to 3 chats (3 bots each) and 100 messages per month.</p><p>Subscribers: Unlimited chats (10 bots each), 5,000 messages per month.</p>
+									<p>Free users: Up to 3 chats (3 bots each) and 100 messages per month.</p><p>Subscribers: Unlimited chats (10 bots each), 5,000 messages per month.</p>
 									<p>Subscribers with API keys (BYOK): Unlimited messages.</p>
 								</div>
 							</details>
