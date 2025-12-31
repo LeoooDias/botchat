@@ -1521,7 +1521,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `chat-${Date.now()}.txt`;
+		a.download = `botchat-chat-${Date.now()}.txt`;
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
