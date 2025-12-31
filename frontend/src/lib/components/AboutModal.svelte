@@ -99,7 +99,7 @@
 										<li>Analyzing something from multiple perspectives</li>
 										<li>Keeping data private and confidential</li>
 									</ol>
-									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what is done with your data *outside* of the model prompt. The risk is purely in the scaffolding.</p><p>Does that AI provider use your chat history to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by bringing all the scaffolding to your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't retain your data for model training purposes ever.</p><p>If the privacy risk is in the scaffolding, how can we bring the scaffolding closer to the user? botchat is an attempt o do just that.</p>
+									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what is done with your data *outside* of the model prompt. The risk is purely in the scaffolding.</p><p>Does that AI provider use your chat history to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by bringing all the scaffolding to your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't retain your data for model training purposes ever.</p><p>If the privacy risk is in the scaffolding, how can we bring the scaffolding closer to the user? botchat is an attempt to do just that.</p>
 								</div>
 							</details>
 							
@@ -131,6 +131,7 @@
 									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk"</p>
 									<p>If you're using your own API keys, they are encrypted with AES-256 and stored only in your browser's local storage, and your data retention settings are fully within your control.</p>
 									<p>AI providers retain data briefly for abuse monitoring only.</p>
+									<p>If you have any suggestions that may help improve privacy, please reach out to leo@botchat.ca.</p>
 								</div>
 							</details>
 
