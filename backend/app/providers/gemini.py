@@ -14,11 +14,13 @@ Privacy & Data Handling:
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from google import genai  # type: ignore[import-untyped]
 from google.genai import types  # type: ignore[import-untyped]
@@ -51,6 +53,67 @@ SUPPORTED_MODELS = {
 }
 
 
+def _strip_exif_metadata(image_bytes: bytes, mime_type: str) -> bytes:
+    """
+    Strip EXIF metadata from images for privacy.
+    
+    EXIF data can contain sensitive info: GPS coordinates, device identifiers,
+    timestamps, camera settings, etc. We strip it before sending to Gemini.
+    
+    Args:
+        image_bytes: Raw image bytes
+        mime_type: Image MIME type (e.g., "image/jpeg")
+        
+    Returns:
+        Image bytes with EXIF stripped (or original if stripping fails)
+    """
+    try:
+        from PIL import Image
+        
+        # Only process supported formats
+        if mime_type not in ("image/jpeg", "image/png", "image/webp", "image/heic"):
+            return image_bytes
+        
+        # Load image
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        # Create clean copy without EXIF
+        output = io.BytesIO()
+        
+        if mime_type == "image/jpeg":
+            img_rgb = img.convert("RGB") if img.mode != "RGB" else img
+            img_rgb.save(output, format="JPEG", quality=95)
+        elif mime_type == "image/png":
+            clean_img = Image.new(img.mode, img.size)
+            clean_img.putdata(list(img.getdata()))
+            clean_img.save(output, format="PNG")
+        elif mime_type == "image/webp":
+            img.save(output, format="WEBP", quality=95)
+        else:
+            return image_bytes
+        
+        stripped_bytes = output.getvalue()
+        logger.debug("Stripped EXIF metadata: %d -> %d bytes", len(image_bytes), len(stripped_bytes))
+        return stripped_bytes
+        
+    except ImportError:
+        logger.warning("Pillow not installed - cannot strip EXIF metadata from images")
+        return image_bytes
+    except Exception as e:
+        logger.warning("Failed to strip EXIF metadata: %s", type(e).__name__)
+        return image_bytes
+
+
+# Default PII patterns for optional scrubbing
+# These are basic examples; production use should consider libraries like Microsoft Presidio
+DEFAULT_PII_PATTERNS = {
+    "email": r'[\w\.-]+@[\w\.-]+\.\w+',
+    "phone_us": r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',
+    "ssn": r'\b\d{3}-\d{2}-\d{4}\b',
+    "credit_card": r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b',
+}
+
+
 @dataclass
 class GeminiConfig:
     """Configuration for Gemini requests."""
@@ -78,23 +141,43 @@ class GeminiProvider:
             print(chunk, end="")
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(
+        self, 
+        api_key: Optional[str] = None,
+        allowed_regions: Optional[List[str]] = None,
+        pii_scrubber: Optional[Callable[[str], str]] = None,
+    ):
         """
         Initialize Gemini provider.
         
         Args:
             api_key: Optional AI Studio API key. If not provided, uses Vertex AI
                     with service account credentials.
+            allowed_regions: Optional list of allowed GCP regions for data sovereignty.
+                           Only applies to Vertex AI backend. If specified and the
+                           configured region is not in the list, raises ValueError.
+            pii_scrubber: Optional callback function to scrub PII from messages
+                         before sending to the API. Signature: (str) -> str
         """
         self.api_key = api_key
-        self.client = self._create_client()
+        self.pii_scrubber = pii_scrubber
         self.backend = "ai_studio" if api_key else "vertex_ai"
         
-        # Log which backend is being used (helpful for debugging BYOK vs Platform)
+        # Privacy Control: Enforce region allow-list for Vertex AI
+        if not api_key and allowed_regions:
+            if VERTEX_REGION not in allowed_regions:
+                raise ValueError(
+                    f"Privacy Violation: Region '{VERTEX_REGION}' is not in allowed list {allowed_regions}. "
+                    f"This may violate data sovereignty requirements."
+                )
+        
+        self.client = self._create_client()
+        
+        # Log which backend is being used (no key material - even suffixes are risky)
         if api_key:
-            logger.info("🔑 BYOK MODE: Using AI Studio with user-provided API key (key prefix: %s...)", api_key[:8] if len(api_key) > 8 else "***")
+            logger.info("🔑 BYOK MODE: Using AI Studio with user-provided API key")
         else:
-            logger.info("🏢 PLATFORM MODE: Using Vertex AI with service account")
+            logger.info("🏢 PLATFORM MODE: Using Vertex AI (%s, %s)", VERTEX_PROJECT, VERTEX_REGION)
         
     def _create_client(self) -> genai.Client:
         """Create the appropriate genai client based on auth method."""
@@ -161,15 +244,51 @@ class GeminiProvider:
         if model not in SUPPORTED_MODELS:
             logger.warning("Model '%s' not in supported list, attempting anyway", model)
         
-        # Build content parts
-        contents = self._build_contents(message, file_data)
+        # Privacy Control: Warn about experimental/preview models
+        # Google's terms may treat preview/experimental data differently than GA models
+        is_experimental = "preview" in model or "exp" in model
+        if is_experimental:
+            logger.warning(
+                "⚠️ Using experimental model '%s'. Data terms may differ from GA models. "
+                "Ensure this is acceptable for your use case.", model
+            )
         
-        # Build generation config
+        # Privacy Control: Apply PII scrubbing if configured
+        processed_message = message
+        if self.pii_scrubber:
+            processed_message = self.pii_scrubber(message)
+            if processed_message != message:
+                logger.debug("PII scrubber modified message before sending")
+        
+        # Build content parts
+        contents = self._build_contents(processed_message, file_data)
+        
+        # Build generation config with explicit safety settings
+        # Being explicit is better than relying on potentially changing defaults
         config = types.GenerateContentConfig(
             max_output_tokens=max_tokens,
             temperature=temperature,
             top_p=0.95,
             top_k=40,
+            # Explicit safety settings - don't rely on defaults
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold="BLOCK_MEDIUM_AND_ABOVE",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="BLOCK_MEDIUM_AND_ABOVE",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold="BLOCK_MEDIUM_AND_ABOVE",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold="BLOCK_MEDIUM_AND_ABOVE",
+                ),
+            ],
         )
         
         if system_instruction:
@@ -188,25 +307,41 @@ class GeminiProvider:
                     yield chunk.text
                     
         except Exception as e:
-            error_msg = str(e)
-            logger.error("Gemini streaming error (%s): %s", self.backend, error_msg)
+            # Tightened logging: avoid leaking prompts via exception strings
+            status_code = getattr(e, "status_code", getattr(e, "code", "n/a"))
+            logger.error("Gemini streaming error (%s, %s, status=%s)", 
+                        self.backend, type(e).__name__, status_code)
+            logger.debug("Gemini streaming error detail: %r", e)
             
-            # Provide user-friendly error messages
-            if "429" in error_msg or "quota" in error_msg.lower():
-                raise RateLimitError(f"Rate limited by Gemini API: {error_msg}")
-            elif "401" in error_msg or "403" in error_msg or "permission" in error_msg.lower():
-                raise AuthenticationError(f"Authentication failed: {error_msg}")
-            elif "invalid" in error_msg.lower() and "model" in error_msg.lower():
-                raise ModelNotFoundError(f"Model '{model}' not available: {error_msg}")
+            error_msg = str(e)
+            error_lower = error_msg.lower()
+            
+            # Provide user-friendly error messages (sanitized - no raw error in user output)
+            if "429" in error_msg or "quota" in error_lower:
+                raise RateLimitError("Rate limited by Gemini API. Please try again later.")
+            elif "401" in error_msg or "403" in error_msg or "permission" in error_lower:
+                raise AuthenticationError("Authentication failed. Please check your credentials.")
+            elif "invalid" in error_lower and "model" in error_lower:
+                raise ModelNotFoundError(f"Model '{model}' is not available.")
             else:
-                raise GeminiAPIError(f"Gemini API error: {error_msg}")
+                raise GeminiAPIError("Gemini API error. Please try again.")
     
     def _build_contents(
         self, 
         message: str, 
         file_data: Optional[List[Dict[str, Any]]] = None
     ) -> List[types.Content]:
-        """Build content parts for the API request."""
+        """
+        Build content parts for the API request.
+        
+        PRIVACY NOTE: We use types.Part.from_bytes (inline data) exclusively.
+        This is intentional - the alternative (File API with file URIs) would
+        upload files to Google storage buckets, creating persistence and
+        lifecycle management concerns. By using inline data, file content
+        exists only within the ephemeral request context.
+        
+        DO NOT use file_uris or the File API to maintain stateless behavior.
+        """
         parts: List[Any] = []
         
         # Add file attachments first (if any)
@@ -214,9 +349,17 @@ class GeminiProvider:
             for fd in file_data:
                 file_bytes = fd.get("bytes")
                 mime_type = fd.get("mime_type", "application/octet-stream")
+                filename = fd.get("name", "file")
                 
                 if file_bytes:
-                    # Inline data (base64 encoded by SDK)
+                    # Strip EXIF metadata from images for privacy
+                    if mime_type.startswith("image/"):
+                        file_bytes = _strip_exif_metadata(file_bytes, mime_type)
+                        logger.debug("Added image to request: %s (%s, %d bytes, EXIF stripped)",
+                                   filename, mime_type, len(file_bytes))
+                    
+                    # PRIVACY: Use inline data (from_bytes), NOT file URIs
+                    # This ensures file data is ephemeral and not persisted
                     parts.append(types.Part.from_bytes(
                         data=file_bytes,
                         mime_type=mime_type,
@@ -301,6 +444,38 @@ class ModelNotFoundError(GeminiAPIError):
 # Convenience Functions
 # -----------------------------
 
+def create_default_pii_scrubber(
+    patterns: Optional[Dict[str, str]] = None,
+    replacement: str = "[REDACTED]",
+) -> Callable[[str], str]:
+    """
+    Create a basic PII scrubber function using regex patterns.
+    
+    NOTE: This is a basic implementation. For production use with sensitive data,
+    consider using robust libraries like Microsoft Presidio or AWS Comprehend.
+    
+    Args:
+        patterns: Dict of {name: regex_pattern}. Uses DEFAULT_PII_PATTERNS if not provided.
+        replacement: Replacement string for matched PII.
+        
+    Returns:
+        A function that takes a string and returns it with PII redacted.
+    
+    Example:
+        scrubber = create_default_pii_scrubber()
+        provider = GeminiProvider(api_key="...", pii_scrubber=scrubber)
+    """
+    active_patterns = patterns or DEFAULT_PII_PATTERNS
+    
+    def scrub(text: str) -> str:
+        result = text
+        for name, pattern in active_patterns.items():
+            result = re.sub(pattern, f"{replacement}", result)
+        return result
+    
+    return scrub
+
+
 def stream_gemini(
     message: str,
     model: str,
@@ -308,6 +483,8 @@ def stream_gemini(
     system_instruction: Optional[str] = None,
     max_tokens: int = 4000,
     file_data: Optional[List[Dict[str, Any]]] = None,
+    allowed_regions: Optional[List[str]] = None,
+    pii_scrubber: Optional[Callable[[str], str]] = None,
 ) -> Generator[str, None, None]:
     """
     Stream a Gemini response.
@@ -321,11 +498,17 @@ def stream_gemini(
         system_instruction: Optional system prompt
         max_tokens: Maximum output tokens
         file_data: Optional file attachments
+        allowed_regions: Optional list of allowed GCP regions (Vertex AI only)
+        pii_scrubber: Optional callback to scrub PII before sending
         
     Yields:
         Text chunks
     """
-    provider = GeminiProvider(api_key=api_key)
+    provider = GeminiProvider(
+        api_key=api_key, 
+        allowed_regions=allowed_regions,
+        pii_scrubber=pii_scrubber,
+    )
     yield from provider.stream(
         message=message,
         model=model,
