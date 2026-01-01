@@ -1,7 +1,7 @@
 <!--
 	OAuth Callback Page
 	
-	Handles redirect from GitHub/Google OAuth.
+	Handles redirect from GitHub/Google/Apple/Microsoft OAuth.
 	Extracts code from URL, exchanges for JWT, redirects to main app.
 -->
 <script lang="ts">

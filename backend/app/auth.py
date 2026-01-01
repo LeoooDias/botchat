@@ -1,7 +1,7 @@
 """Authentication module for botchat.
 
 Handles OAuth token validation and JWT generation/verification.
-Supports GitHub and Google OAuth providers.
+Supports GitHub, Google, Apple, and Microsoft OAuth providers.
 
 Security model:
 - OAuth tokens are validated against provider APIs
@@ -37,6 +37,13 @@ GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")  # Service ID (e.g., com.botchat.auth)
+APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "")
+APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "")
+APPLE_PRIVATE_KEY = os.environ.get("APPLE_PRIVATE_KEY", "")  # PEM format, newlines as \n
+MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
+MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "common")  # 'common' for multi-tenant
 
 # Auth mode - disable for local development
 REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "false").lower() == "true"
@@ -79,7 +86,7 @@ def check_email_allowed(email: Optional[str]) -> None:
 @dataclass
 class UserInfo:
     """Minimal user info extracted from OAuth/JWT."""
-    provider: str  # "github" or "google"
+    provider: str  # "github", "google", "apple", or "microsoft"
     user_id: str   # Provider-specific user ID
     email: Optional[str] = None
     name: Optional[str] = None
@@ -89,8 +96,9 @@ class UserInfo:
 class OAuthCallbackRequest(BaseModel):
     """OAuth callback with authorization code."""
     code: str
-    provider: str  # "github" or "google"
+    provider: str  # "github", "google", "apple", or "microsoft"
     redirect_uri: str
+    id_token: Optional[str] = None  # Apple sends id_token via POST
 
 
 class AuthResponse(BaseModel):
@@ -295,12 +303,170 @@ async def exchange_google_code(code: str, redirect_uri: str) -> UserInfo:
         )
 
 
+async def exchange_apple_code(code: str, redirect_uri: str, id_token: Optional[str] = None) -> UserInfo:
+    """Exchange Apple OAuth code for user info.
+    
+    Apple Sign In flow:
+    1. Generate client_secret JWT signed with Apple private key
+    2. Exchange code for tokens (including id_token)
+    3. Decode id_token to get user info
+    
+    Note: Apple only sends user's name on FIRST authorization.
+    We store it in the JWT but can't retrieve it again.
+    """
+    if not APPLE_CLIENT_ID or not APPLE_TEAM_ID or not APPLE_KEY_ID or not APPLE_PRIVATE_KEY:
+        raise HTTPException(status_code=500, detail="Apple OAuth not configured")
+    
+    # Apple requires a client_secret JWT signed with your private key
+    import time as time_module
+    client_secret_payload: dict[str, Any] = {
+        "iss": APPLE_TEAM_ID,
+        "iat": int(time_module.time()),
+        "exp": int(time_module.time()) + 86400 * 180,  # 6 months max
+        "aud": "https://appleid.apple.com",
+        "sub": APPLE_CLIENT_ID,
+    }
+    
+    # Handle private key - may have \n as literal string
+    private_key = APPLE_PRIVATE_KEY.replace("\\n", "\n")
+    
+    client_secret = jwt.encode(
+        client_secret_payload,
+        private_key,
+        algorithm="ES256",
+        headers={"kid": APPLE_KEY_ID}
+    )
+    
+    async with httpx.AsyncClient() as client:
+        # Exchange code for tokens
+        token_resp = await client.post(
+            "https://appleid.apple.com/auth/token",
+            data={
+                "client_id": APPLE_CLIENT_ID,
+                "client_secret": client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        
+        if token_resp.status_code != 200:
+            logger.error("Apple token exchange failed: %s", token_resp.text)
+            raise HTTPException(status_code=401, detail="Apple authentication failed")
+        
+        token_data = token_resp.json()
+        received_id_token = token_data.get("id_token") or id_token
+        
+        if not received_id_token:
+            raise HTTPException(status_code=401, detail="Apple id_token missing")
+        
+        # Decode id_token (Apple's id_token is a JWT)
+        try:
+            claims = jwt.get_unverified_claims(received_id_token)
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid Apple id_token")
+        
+        # Apple provides email in claims, but name only on first auth (via form POST)
+        # The name would need to be passed from frontend if available
+        return UserInfo(
+            provider="apple",
+            user_id=claims["sub"],
+            email=claims.get("email"),
+            name=None,  # Apple doesn't include name in id_token
+            avatar_url=None,  # Apple doesn't provide avatar
+        )
+
+
+async def exchange_microsoft_code(code: str, redirect_uri: str) -> UserInfo:
+    """Exchange Microsoft OAuth code for user info.
+    
+    Flow:
+    1. Exchange code for tokens (including id_token and access_token)
+    2. Decode id_token or call Graph API for user info
+    3. Return minimal UserInfo
+    """
+    if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Microsoft OAuth not configured")
+    
+    async with httpx.AsyncClient() as client:
+        # Exchange code for tokens
+        token_resp = await client.post(
+            f"https://login.microsoftonline.com/{MICROSOFT_TENANT_ID}/oauth2/v2.0/token",
+            data={
+                "client_id": MICROSOFT_CLIENT_ID,
+                "client_secret": MICROSOFT_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        
+        if token_resp.status_code != 200:
+            logger.error("Microsoft token exchange failed: %s", token_resp.text)
+            raise HTTPException(status_code=401, detail="Microsoft authentication failed")
+        
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        id_token = token_data.get("id_token")
+        
+        if not access_token:
+            raise HTTPException(status_code=401, detail="Microsoft access_token missing")
+        
+        # Try to get user info from id_token first
+        email = None
+        name = None
+        user_id = None
+        
+        if id_token:
+            try:
+                claims = jwt.get_unverified_claims(id_token)
+                user_id = claims.get("sub") or claims.get("oid")
+                email = claims.get("email") or claims.get("preferred_username")
+                name = claims.get("name")
+            except JWTError:
+                pass
+        
+        # Fetch additional user info from Microsoft Graph API
+        user_resp = await client.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        
+        if user_resp.status_code == 200:
+            user_data = user_resp.json()
+            user_id = user_id or user_data.get("id")
+            email = email or user_data.get("mail") or user_data.get("userPrincipalName")
+            name = name or user_data.get("displayName")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Failed to get Microsoft user ID")
+        
+        # Try to get profile photo URL
+        # Microsoft Graph returns binary, so we'd need to store it
+        # For now, we skip avatar - could be enhanced later
+        avatar_url = None
+        
+        return UserInfo(
+            provider="microsoft",
+            user_id=user_id,
+            email=email,
+            name=name,
+            avatar_url=avatar_url,
+        )
+
+
 async def exchange_oauth_code(req: OAuthCallbackRequest) -> UserInfo:
     """Exchange OAuth code for user info (dispatcher)."""
     if req.provider == "github":
         return await exchange_github_code(req.code, req.redirect_uri)
     elif req.provider == "google":
         return await exchange_google_code(req.code, req.redirect_uri)
+    elif req.provider == "apple":
+        return await exchange_apple_code(req.code, req.redirect_uri, req.id_token)
+    elif req.provider == "microsoft":
+        return await exchange_microsoft_code(req.code, req.redirect_uri)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
 
@@ -375,3 +541,33 @@ def get_google_auth_url(redirect_uri: str, state: str = "") -> str:
     if state:
         params["state"] = state
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+
+def get_apple_auth_url(redirect_uri: str, state: str = "") -> str:
+    """Build Apple OAuth authorization URL."""
+    from urllib.parse import urlencode
+    params = {
+        "client_id": APPLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "name email",
+        "response_mode": "form_post",  # Apple requires form_post for web
+    }
+    if state:
+        params["state"] = state
+    return f"https://appleid.apple.com/auth/authorize?{urlencode(params)}"
+
+
+def get_microsoft_auth_url(redirect_uri: str, state: str = "") -> str:
+    """Build Microsoft OAuth authorization URL."""
+    from urllib.parse import urlencode
+    params = {
+        "client_id": MICROSOFT_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile User.Read",
+        "response_mode": "query",
+    }
+    if state:
+        params["state"] = state
+    return f"https://login.microsoftonline.com/{MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize?{urlencode(params)}"

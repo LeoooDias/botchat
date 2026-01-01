@@ -1,7 +1,7 @@
 <!--
 	SignInModal Component
 	
-	Modal dialog with GitHub and Google sign-in options.
+	Modal dialog with GitHub, Google, Apple, and Microsoft sign-in options.
 -->
 <script lang="ts">
 	import { startOAuthFlow, authError, auth } from '$lib/stores/auth';
@@ -20,6 +20,14 @@
 
 	async function handleGoogleLogin() {
 		await startOAuthFlow('google');
+	}
+
+	async function handleAppleLogin() {
+		await startOAuthFlow('apple');
+	}
+
+	async function handleMicrosoftLogin() {
+		await startOAuthFlow('microsoft');
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -85,6 +93,29 @@
 						<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 					</svg>
 					<span class="font-medium">Continue with Google</span>
+				</button>
+
+				<button
+					on:click={handleAppleLogin}
+					class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-black hover:bg-gray-900 text-white rounded-lg transition-colors"
+				>
+					<svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+					</svg>
+					<span class="font-medium">Continue with Apple</span>
+				</button>
+
+				<button
+					on:click={handleMicrosoftLogin}
+					class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 transition-colors dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
+				>
+					<svg class="w-5 h-5" viewBox="0 0 24 24">
+						<path fill="#F25022" d="M1 1h10v10H1z"/>
+						<path fill="#00A4EF" d="M1 13h10v10H1z"/>
+						<path fill="#7FBA00" d="M13 1h10v10H13z"/>
+						<path fill="#FFB900" d="M13 13h10v10H13z"/>
+					</svg>
+					<span class="font-medium">Continue with Microsoft</span>
 				</button>
 			</div>
 

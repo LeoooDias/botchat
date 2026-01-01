@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 from pypdf import PdfReader
@@ -66,6 +67,8 @@ from app.auth import (
     get_current_user,
     get_github_auth_url,
     get_google_auth_url,
+    get_apple_auth_url,
+    get_microsoft_auth_url,
     REQUIRE_AUTH,
 )
 
@@ -1019,15 +1022,54 @@ async def get_auth_url(req: AuthUrlRequest):
     """Get OAuth authorization URL for a provider.
     
     Frontend redirects user to this URL to start OAuth flow.
+    
+    Note: For Apple, we use the backend callback URL because Apple requires
+    form_post response mode which sends a POST request. The backend receives
+    the POST and redirects to the frontend with the code as a query param.
     """
     if req.provider == "github":
         url = get_github_auth_url(req.redirect_uri)
     elif req.provider == "google":
         url = get_google_auth_url(req.redirect_uri)
+    elif req.provider == "apple":
+        # Apple needs to POST to backend, which then redirects to frontend
+        # BACKEND_URL must be set in environment for Apple Sign In to work
+        backend_url = os.environ.get("BACKEND_URL", "")
+        if not backend_url:
+            raise HTTPException(status_code=500, detail="BACKEND_URL not configured for Apple Sign In")
+        apple_redirect = f"{backend_url}/auth/apple/callback"
+        url = get_apple_auth_url(apple_redirect)
+    elif req.provider == "microsoft":
+        url = get_microsoft_auth_url(req.redirect_uri)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
     
     return AuthUrlResponse(url=url)
+
+
+# Frontend URL for redirects (needed for Apple callback)
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+
+
+@app.post("/auth/apple/callback")
+async def apple_callback_post(
+    code: str = Form(...),
+    state: Optional[str] = Form(None),
+    id_token: Optional[str] = Form(None),
+    user: Optional[str] = Form(None),  # Apple sends user info as JSON string on first auth
+):
+    """Handle Apple's form POST callback.
+    
+    Apple Sign In uses response_mode=form_post, which sends the authorization
+    code via POST. This endpoint receives that POST and redirects to the
+    frontend callback page with the code as a query parameter.
+    """
+    # Build redirect URL to frontend
+    redirect_url = f"{FRONTEND_URL}/auth/callback?code={code}&provider=apple"
+    if state:
+        redirect_url += f"&state={state}"
+    
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @app.post("/auth/callback", response_model=AuthResponse)

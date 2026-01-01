@@ -13,7 +13,7 @@ import { browser } from '$app/environment';
 // -----------------------------
 
 export interface User {
-	provider: 'github' | 'google' | 'dev';
+	provider: 'github' | 'google' | 'apple' | 'microsoft' | 'dev';
 	id: string;
 	email: string | null;
 	name: string | null;
@@ -191,7 +191,7 @@ function isEmbeddedWebview(): boolean {
 /**
  * Get OAuth authorization URL for a provider.
  */
-export async function getAuthUrl(provider: 'github' | 'google'): Promise<string> {
+export async function getAuthUrl(provider: 'github' | 'google' | 'apple' | 'microsoft'): Promise<string> {
 	const redirectUri = `${window.location.origin}/auth/callback`;
 	console.log(`[Auth] getAuthUrl for ${provider}, redirect_uri: ${redirectUri}`);
 	
@@ -218,7 +218,7 @@ export async function getAuthUrl(provider: 'github' | 'google'): Promise<string>
  */
 export async function exchangeCode(
 	code: string,
-	provider: 'github' | 'google'
+	provider: 'github' | 'google' | 'apple' | 'microsoft'
 ): Promise<{ token: string; user: User; expiresAt: number }> {
 	const redirectUri = `${window.location.origin}/auth/callback`;
 
@@ -245,16 +245,16 @@ export async function exchangeCode(
  * Start OAuth flow by redirecting to provider.
  * Detects embedded webviews for Google OAuth (which blocks them).
  */
-export async function startOAuthFlow(provider: 'github' | 'google'): Promise<void> {
+export async function startOAuthFlow(provider: 'github' | 'google' | 'apple' | 'microsoft'): Promise<void> {
 	console.log(`[Auth] Starting ${provider} OAuth flow`);
 	auth.setLoading(true);
 	auth.clearError();
 	
-	// Google blocks OAuth in embedded webviews (error 403: disallowed_useragent)
-	// GitHub allows it, so only check for Google
-	if (provider === 'google' && isEmbeddedWebview()) {
-		console.log(`[Auth] Detected embedded webview, blocking Google OAuth`);
-		auth.setError('Google sign-in is blocked in this browser. Please open botchat in Safari, Chrome, or another browser. Alternatively, use GitHub sign-in.');
+	// Google and Apple block OAuth in embedded webviews (error 403: disallowed_useragent)
+	// GitHub and Microsoft typically allow it, so only check for Google and Apple
+	if ((provider === 'google' || provider === 'apple') && isEmbeddedWebview()) {
+		console.log(`[Auth] Detected embedded webview, blocking ${provider} OAuth`);
+		auth.setError(`${provider === 'google' ? 'Google' : 'Apple'} sign-in is blocked in this browser. Please open botchat in Safari, Chrome, or another browser. Alternatively, use GitHub or Microsoft sign-in.`);
 		return;
 	}
 	
@@ -283,7 +283,7 @@ export async function completeOAuthFlow(code: string): Promise<boolean> {
 	auth.setLoading(true);
 	auth.clearError();
 
-	const provider = browser ? (sessionStorage.getItem('oauth_provider') as 'github' | 'google') : null;
+	const provider = browser ? (sessionStorage.getItem('oauth_provider') as 'github' | 'google' | 'apple' | 'microsoft') : null;
 	if (!provider) {
 		auth.setError('OAuth session expired. Please try again.');
 		return false;
