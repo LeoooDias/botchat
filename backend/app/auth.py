@@ -464,7 +464,12 @@ async def exchange_oauth_code(req: OAuthCallbackRequest) -> UserInfo:
     elif req.provider == "google":
         return await exchange_google_code(req.code, req.redirect_uri)
     elif req.provider == "apple":
-        return await exchange_apple_code(req.code, req.redirect_uri, req.id_token)
+        # Apple uses backend callback URL (form_post) - must use that URL for token exchange
+        backend_url = os.environ.get("BACKEND_URL", "")
+        if not backend_url:
+            raise HTTPException(status_code=500, detail="BACKEND_URL not configured for Apple Sign In")
+        apple_redirect = f"{backend_url}/auth/apple/callback"
+        return await exchange_apple_code(req.code, apple_redirect, req.id_token)
     elif req.provider == "microsoft":
         return await exchange_microsoft_code(req.code, req.redirect_uri)
     else:
