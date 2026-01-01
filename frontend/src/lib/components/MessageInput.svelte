@@ -118,7 +118,7 @@
 			{#if currentMessage.trim() && estimatedTokens > 0}
 				<div class="hidden md:flex items-center pr-3 h-full">
 					<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-						~{estimatedTokens.toLocaleString()}
+						~{estimatedTokens.toLocaleString()} tokens
 					</span>
 				</div>
 			{/if}

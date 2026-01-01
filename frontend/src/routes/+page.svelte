@@ -1944,7 +1944,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						</p>
 						
 						<p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-							Sign in with Google or GitHub to try out botchat.
+							Sign in to try out botchat.
 						</p>
 					</div>
 					
