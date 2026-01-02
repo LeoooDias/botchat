@@ -211,7 +211,7 @@
 				<input
 					id="system-file"
 					type="file"
-					accept=".txt,.pdf,.docx,.doc"
+					accept=".txt,.pdf,.docx,.md"
 					on:change={handleFileUpload}
 					class="block flex-1 text-xs text-gray-500 dark:text-gray-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/50 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-900"
 				/>

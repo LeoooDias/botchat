@@ -64,6 +64,8 @@ SUPPORTED_MODELS = {
 }
 
 # Models that support vision (image inputs)
+# Most modern GPT models support vision - this list is for explicit confirmation
+# Models not listed here will still attempt vision if image is provided
 VISION_MODELS = {
     "gpt-4o",
     "gpt-4o-mini",
@@ -71,6 +73,20 @@ VISION_MODELS = {
     "gpt-4.1",
     "gpt-4.1-mini",
     "o1",
+    # GPT-5 family (2025-2026)
+    "gpt-5",
+    "gpt-5.1",
+    "gpt-5.2",
+    "gpt-5-mini",
+}
+
+# Models known to NOT support vision
+NO_VISION_MODELS = {
+    "gpt-3.5-turbo",
+    "gpt-4",  # base gpt-4 without vision
+    "o1-mini",
+    "o1-preview",
+    "o3-mini",
 }
 
 # Models that DON'T support system instructions (reasoning models)
@@ -406,8 +422,10 @@ class OpenAIProvider:
         # Build user message content
         user_content: Any = message  # Default to simple string
         
-        # Handle file attachments (images only for vision models)
-        if file_data and model in VISION_MODELS:
+        # Handle file attachments (images)
+        # Attempt vision for all models except those known to not support it
+        # This is more future-proof than maintaining an allowlist
+        if file_data and model not in NO_VISION_MODELS:
             # Multi-part content for vision
             content_parts: List[Dict[str, Any]] = []
             
@@ -445,7 +463,7 @@ class OpenAIProvider:
             })
             
             user_content = content_parts
-        elif file_data and model not in VISION_MODELS:
+        elif file_data and model in NO_VISION_MODELS:
             logger.warning("Model %s doesn't support vision, ignoring %d file(s)", 
                          model, len(file_data))
         

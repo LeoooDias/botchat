@@ -1296,7 +1296,28 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				body: formData
 			});
 
-			if (!response.ok) throw new Error('Failed to create run');
+			if (!response.ok) {
+				// Check for authentication failure (401 = token invalid/expired)
+				if (response.status === 401) {
+					// Clear stale auth and prompt re-login
+					logout();
+					messages = [
+						...messages,
+						{
+							id: crypto.randomUUID(),
+							role: 'assistant',
+							content: '⚠️ **Session expired** — Your authentication token is no longer valid. Please sign in again to continue.',
+							timestamp: Date.now(),
+							isError: true
+						}
+					];
+					signInOpen = true;
+					isLoading = false;
+					currentRunAbortController = null;
+					return;
+				}
+				throw new Error('Failed to create run');
+			}
 			const { run_id } = await response.json();
 
 			// Stream events

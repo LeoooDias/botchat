@@ -5,12 +5,38 @@
 	let isDragging = false;
 	let errorMessage = '';
 
-	const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt'];
+	// Supported file types - keep in sync with backend
+	const ALLOWED_EXTENSIONS = [
+		// Documents (text extracted for AI)
+		'.pdf', '.docx', '.txt', '.md',
+		// Images (native support)
+		'.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic',
+		// Code & Data
+		'.json', '.csv', '.xml', '.yaml', '.yml',
+		'.py', '.js', '.ts', '.html', '.css'
+	];
 	const ALLOWED_MIME_TYPES = [
+		// Documents
 		'application/pdf',
-		'application/msword',
 		'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-		'text/plain'
+		'text/plain',
+		'text/markdown',
+		// Images
+		'image/png',
+		'image/jpeg',
+		'image/gif',
+		'image/webp',
+		'image/heic',
+		// Code & Data
+		'application/json',
+		'text/csv',
+		'application/xml',
+		'application/yaml',
+		'text/x-python',
+		'text/javascript',
+		'text/typescript',
+		'text/html',
+		'text/css'
 	];
 	const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit (Gemini's max for inline PDFs)
 
@@ -56,7 +82,7 @@
 
 		const errors: string[] = [];
 		if (invalidTypeFiles.length > 0) {
-			errors.push(`Unsupported file type${invalidTypeFiles.length > 1 ? 's' : ''}: ${invalidTypeFiles.join(', ')}. Only PDF, DOC, DOCX, and TXT files are allowed.`);
+			errors.push(`Unsupported file type${invalidTypeFiles.length > 1 ? 's' : ''}: ${invalidTypeFiles.join(', ')}. Supported: PDF, DOCX, TXT, images (PNG/JPG/GIF/WebP), and code files.`);
 		}
 
 		if (errors.length > 0) {
@@ -159,13 +185,13 @@
 							<span class="hidden md:inline">Drag & drop files or&nbsp;</span><span class="text-green-600 dark:text-green-400 font-medium underline">Tap to browse</span>
 						{/if}
 					</p>
-					<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">PDF, DOC, DOCX, TXT • Max 50MB each</p>
+					<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">PDF, DOCX, TXT, Images, Code • Max 50MB</p>
 				</div>
 				<input
 					id="attachment"
 					type="file"
 					multiple
-					accept=".pdf,.doc,.docx,.txt"
+						accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.heic,.json,.csv,.xml,.yaml,.yml,.py,.js,.ts,.html,.css"
 					on:change={handleFileUpload}
 					class="sr-only"
 				/>

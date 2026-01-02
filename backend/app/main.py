@@ -20,6 +20,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 from pypdf import PdfReader
+from docx import Document as DocxDocument
 
 # Native AI Providers (v2.4.0 - fully native, no msgmodel dependency)
 from app.providers.gemini import (
@@ -179,6 +180,37 @@ def extract_pdf_text(file_bytes: bytes) -> str:
         return ""
 
 
+def extract_docx_text(file_bytes: bytes) -> str:
+    """Extract text from DOCX file.
+    
+    Returns extracted text, or empty string if extraction fails.
+    """
+    try:
+        docx_file = io.BytesIO(file_bytes)
+        doc = DocxDocument(docx_file)
+        text_parts = []
+        
+        for para in doc.paragraphs:
+            if para.text and para.text.strip():
+                text_parts.append(para.text)
+        
+        # Also extract text from tables
+        for table in doc.tables:
+            for row in table.rows:
+                row_texts = []
+                for cell in row.cells:
+                    if cell.text and cell.text.strip():
+                        row_texts.append(cell.text.strip())
+                if row_texts:
+                    text_parts.append(" | ".join(row_texts))
+        
+        extracted = "\n\n".join(text_parts)
+        return extracted
+    except Exception as e:
+        logger.warning("DOCX text extraction failed: %s", str(e))
+        return ""
+
+
 def prepare_file_for_provider(
     file_bytes: bytes, 
     filename: str, 
@@ -190,44 +222,67 @@ def prepare_file_for_provider(
     
     For PDF files:
     - Gemini: Returns original PDF (native support)
-    - OpenAI: Extracts text and returns it as a text attachment metadata
+    - OpenAI/Anthropic: Extracts text and returns it as a text attachment metadata
               If extraction fails, includes a warning message about the PDF
     
-    For non-PDF: Returns original file for all providers
+    For DOCX files:
+    - All providers: Extract text (no provider supports DOCX natively)
+    
+    For other files: Returns original file for all providers
     """
-    is_pdf = filename.lower().endswith('.pdf')
+    filename_lower = filename.lower()
+    is_pdf = filename_lower.endswith('.pdf')
+    is_docx = filename_lower.endswith('.docx')
+    is_legacy_doc = filename_lower.endswith('.doc') and not filename_lower.endswith('.docx')
     
-    if not is_pdf:
-        # Non-PDF files: pass through unchanged
-        file_like = io.BytesIO(file_bytes)
-        file_like.seek(0)
-        return file_like, filename, None
+    # Legacy .DOC format - not supported, ask user to convert
+    if is_legacy_doc:
+        warning_msg = f"[DOC Error] The legacy .doc format is not supported. Please save '{filename}' as .docx (Word 2007+) and try again."
+        logger.warning("%s", warning_msg)
+        return None, None, warning_msg
     
-    # PDF handling
-    if provider.lower() == "gemini":
-        # Gemini supports PDFs natively
-        file_like = io.BytesIO(file_bytes)
-        file_like.seek(0)
-        return file_like, filename, None
-    elif provider.lower() in ("openai", "anthropic"):
-        # OpenAI and Anthropic: Extract text from PDF
-        # Neither supports native PDF - Anthropic has strict request size limits
-        extracted_text = extract_pdf_text(file_bytes)
+    # DOCX handling - extract text for all providers (none support DOCX natively)
+    if is_docx:
+        extracted_text = extract_docx_text(file_bytes)
         if extracted_text and extracted_text.strip():
-            logger.debug("PDF text extracted from %s: %d chars", filename, len(extracted_text))
-            # Return None for file_like since we're using text instead
+            logger.info("DOCX text extracted from %s: %d chars", filename, len(extracted_text))
             return None, None, extracted_text
         else:
-            # PDF extraction failed or returned empty content
-            # This typically happens with scanned/image-based PDFs
-            warning_msg = f"[PDF Error] Could not extract text from '{filename}'. This is typically because the PDF contains scanned images or OCR-protected content. Please provide a text-based PDF or paste the content as text."
+            warning_msg = f"[DOCX Error] Could not extract text from '{filename}'. The document may be empty, password-protected, or in an unsupported format."
             logger.warning("%s", warning_msg)
             return None, None, warning_msg
-    else:
-        # Other providers: return original PDF
-        file_like = io.BytesIO(file_bytes)
-        file_like.seek(0)
-        return file_like, filename, None
+    
+    # PDF handling
+    if is_pdf:
+        if provider.lower() == "gemini":
+            # Gemini supports PDFs natively
+            file_like = io.BytesIO(file_bytes)
+            file_like.seek(0)
+            return file_like, filename, None
+        elif provider.lower() in ("openai", "anthropic"):
+            # OpenAI and Anthropic: Extract text from PDF
+            # Neither supports native PDF - Anthropic has strict request size limits
+            extracted_text = extract_pdf_text(file_bytes)
+            if extracted_text and extracted_text.strip():
+                logger.debug("PDF text extracted from %s: %d chars", filename, len(extracted_text))
+                # Return None for file_like since we're using text instead
+                return None, None, extracted_text
+            else:
+                # PDF extraction failed or returned empty content
+                # This typically happens with scanned/image-based PDFs
+                warning_msg = f"[PDF Error] Could not extract text from '{filename}'. This is typically because the PDF contains scanned images or OCR-protected content. Please provide a text-based PDF or paste the content as text."
+                logger.warning("%s", warning_msg)
+                return None, None, warning_msg
+        else:
+            # Other providers: return original PDF
+            file_like = io.BytesIO(file_bytes)
+            file_like.seek(0)
+            return file_like, filename, None
+    
+    # Non-PDF/DOCX files: pass through unchanged
+    file_like = io.BytesIO(file_bytes)
+    file_like.seek(0)
+    return file_like, filename, None
 
 
 def get_privacy_info(provider: str, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -456,26 +511,36 @@ def _get_mime_type(filename: str) -> str:
     """
     ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
     mime_types = {
+        # Documents
         'pdf': 'application/pdf',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'txt': 'text/plain',
         'md': 'text/markdown',
+        'rtf': 'application/rtf',
+        # Data formats
         'json': 'application/json',
         'csv': 'text/csv',
+        'xml': 'application/xml',
+        'yaml': 'application/yaml',
+        'yml': 'application/yaml',
+        # Code files
         'py': 'text/x-python',
         'js': 'text/javascript',
         'ts': 'text/typescript',
         'html': 'text/html',
         'css': 'text/css',
-        'xml': 'application/xml',
-        'yaml': 'application/yaml',
-        'yml': 'application/yaml',
+        # Images
         'png': 'image/png',
         'jpg': 'image/jpeg',
         'jpeg': 'image/jpeg',
         'gif': 'image/gif',
         'webp': 'image/webp',
+        'heic': 'image/heic',
     }
-    return mime_types.get(ext, 'application/octet-stream')
+    result = mime_types.get(ext, 'application/octet-stream')
+    logger.info("_get_mime_type: filename='%s', ext='%s', mime_type='%s'", filename, ext, result)
+    return result
 
 
 async def publish(run: RunState, event: str, data: Any) -> None:
@@ -681,15 +746,17 @@ async def _stream_openai_native(
                 
                 # Build file data for native provider (images only)
                 file_data = None
+                logger.info("OpenAI file check: file_like=%s, filename=%s", file_like is not None, filename)
                 if file_like and filename:
                     file_like.seek(0)
                     file_bytes = file_like.read()
                     mime_type = _get_mime_type(filename)
+                    logger.info("OpenAI: file_bytes=%d, mime_type=%s", len(file_bytes), mime_type)
                     
                     # OpenAI only supports images natively, PDFs are text-extracted
                     if mime_type.startswith("image/"):
                         file_data = [{"bytes": file_bytes, "mime_type": mime_type, "name": filename}]
-                        logger.debug("Image prepared for OpenAI: %s (%s, %d bytes)", 
+                        logger.info("Image prepared for OpenAI: %s (%s, %d bytes)", 
                                    filename, mime_type, len(file_bytes))
                     else:
                         logger.debug("Non-image file %s handled via text extraction", filename)
@@ -806,15 +873,17 @@ async def _stream_anthropic_native(
                 
                 # Build file data for native provider (images only)
                 file_data = None
+                logger.info("Anthropic file check: file_like=%s, filename=%s", file_like is not None, filename)
                 if file_like and filename:
                     file_like.seek(0)
                     file_bytes = file_like.read()
                     mime_type = _get_mime_type(filename)
+                    logger.info("Anthropic: file_bytes=%d, mime_type=%s", len(file_bytes), mime_type)
                     
                     # Anthropic only supports images natively, PDFs are text-extracted
                     if mime_type.startswith("image/"):
                         file_data = [{"bytes": file_bytes, "mime_type": mime_type, "name": filename}]
-                        logger.debug("Image prepared for Anthropic: %s (%s, %d bytes)", 
+                        logger.info("Image prepared for Anthropic: %s (%s, %d bytes)", 
                                    filename, mime_type, len(file_bytes))
                     else:
                         logger.debug("Non-image file %s handled via text extraction", filename)
@@ -1140,14 +1209,10 @@ async def get_encryption_key(user: UserInfo = Depends(require_auth)):
     This key is used to encrypt/decrypt AI provider API keys in localStorage.
     The actual API keys never touch the server - only the encryption key.
     """
-    from app.database import get_user_by_oauth, get_user_by_email
+    from app.database import get_user_by_oauth
     
-    # Get user from database
+    # Get user from database by OAuth provider and ID
     db_user = await get_user_by_oauth(user.provider, user.user_id)
-    
-    # If not found by OAuth, try by email (for linked accounts)
-    if not db_user and user.email:
-        db_user = await get_user_by_email(user.email)
     
     if not db_user or not db_user.get('encryption_key'):
         raise HTTPException(status_code=404, detail="User encryption key not found")
@@ -1322,13 +1387,16 @@ async def create_run(
             try:
                 file_bytes = await attachment.read()
                 filename = attachment.filename or "unknown"
+                content_type = attachment.content_type or "unknown"
                 
                 file_list.append((file_bytes, filename))
-                logger.debug("Attachment received: filename=%s, size=%d bytes", filename, len(file_bytes))
+                # INFO level log to diagnose mobile attachment issues
+                logger.info("Attachment received: filename='%s', content_type='%s', size=%d bytes", 
+                           filename, content_type, len(file_bytes))
                 
                 # Log PDF detection
                 if filename.lower().endswith('.pdf'):
-                    logger.debug("PDF detected - will extract text for OpenAI, pass native PDF to Gemini")
+                    logger.info("PDF detected - will extract text for OpenAI, pass native PDF to Gemini")
             except Exception as e:
                 logger.error("Failed to read attachment %s: %s", attachment.filename, str(e))
                 raise HTTPException(status_code=400, detail=f"Failed to read attachment: {str(e)}")

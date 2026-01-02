@@ -15,6 +15,9 @@ anthropic>=0.40.0
 # PDF support
 pypdf>=6.0.0
 
+# DOCX support
+python-docx>=1.1.0
+
 # Image processing (EXIF stripping for privacy)
 Pillow>=10.0.0
 

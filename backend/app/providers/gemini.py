@@ -357,9 +357,15 @@ class GeminiProvider:
                 raise RateLimitError("Rate limited by Gemini API. Please try again later.") from None
             elif "401" in error_msg or "403" in error_msg or "permission" in error_lower:
                 raise AuthenticationError("Authentication failed. Please check your credentials.") from None
-            elif "invalid" in error_lower and "model" in error_lower:
+            elif status_code == 404 or "model not found" in error_lower or ("models/" in error_lower and "not found" in error_lower):
+                # Only trigger ModelNotFoundError for actual model-not-found errors
+                # Avoid false positives from errors like "model received invalid input"
                 raise ModelNotFoundError(f"Model '{model}' is not available.") from None
             else:
+                # Include error details for debugging (sanitized to avoid PII)
+                # This helps identify the root cause while keeping user-friendly messages
+                safe_error = error_lower[:200] if len(error_lower) > 200 else error_lower
+                logger.warning("Gemini API error details: %s", safe_error)
                 raise GeminiAPIError("Gemini API error. Please try again.") from None
         finally:
             # Best-effort memory cleanup for sensitive data

@@ -58,20 +58,33 @@ SUPPORTED_MODELS = {
 }
 
 # Models that support vision (image inputs)
+# All Claude 3+ models support vision - this list confirms known models
+# Models not listed will still attempt vision (Claude generally supports it)
 VISION_MODELS = {
+    # Claude 4.5 family (2026)
+    "claude-opus-4-5",
+    "claude-sonnet-4-5",
+    "claude-opus-4.5",
+    "claude-sonnet-4.5",
+    # Claude 4 family (2025)
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
     "claude-sonnet-4",
     "claude-opus-4",
+    # Claude 3.5 family
     "claude-3-5-sonnet-20241022",
     "claude-3-5-sonnet-latest",
     "claude-3-5-haiku-20241022",
     "claude-3-5-haiku-latest",
+    # Claude 3 family
     "claude-3-opus-20240229",
     "claude-3-opus-latest",
     "claude-3-sonnet-20240229",
     "claude-3-haiku-20240307",
 }
+
+# Models known to NOT support vision (currently none for Claude 3+)
+NO_VISION_MODELS: set[str] = set()
 
 # Max tokens limits by model (approximate)
 DEFAULT_MAX_TOKENS = 4096
@@ -382,8 +395,10 @@ class AnthropicProvider:
         # Build user message content
         content: Any = message  # Default to simple string
         
-        # Handle file attachments (images for vision models)
-        if file_data and model in VISION_MODELS:
+        # Handle file attachments (images)
+        # Attempt vision for all models except those known to not support it
+        # All Claude 3+ models support vision, so this is very permissive
+        if file_data and model not in NO_VISION_MODELS:
             content_parts: List[Dict[str, Any]] = []
             
             for fd in file_data:
@@ -421,7 +436,7 @@ class AnthropicProvider:
             })
             
             content = content_parts
-        elif file_data and model not in VISION_MODELS:
+        elif file_data and model in NO_VISION_MODELS:
             logger.warning("Model %s doesn't support vision, ignoring %d file(s)", 
                          model, len(file_data))
         
