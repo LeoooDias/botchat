@@ -74,9 +74,9 @@
 							<li>No AI provider data retention for model training</li>							
 							<li>Customizable personalities and instructions per bot</li>
 							<li>File attachments and PDF support (your attachments never touch botchat servers)</li>
-							<li>Privacy-by-design: botchat never stores chats or attachments on our servers</li>
-							<li> BYOK: take full control by using your own API keys, stored safely in your browser</li>
-							<li>Other than sending your prompts to AI providers, we don't share data with third parties</li>
+							<li>Privacy by design: botchat obsesses over privacy settings in AI provider APIs)</li>
+							<li>BYOK: take full control by using your own API keys, stored safely in your browser</li>
+							<li>botchat never shares your personal data with third parties</li>
 						</ul>
 					</section>
 
@@ -99,7 +99,7 @@
 										<li>Analyzing something from multiple perspectives</li>
 										<li>Keeping data private and confidential</li>
 									</ol>
-									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what is done with your data *outside* of the model prompt. </p><p>Does that AI provider use your chat history to train future models? If you shared that sensitive PDF and, months later, the AI provider is breached, are you exposed?</p><p>botchat solves this privacy dilemma by keeping that data on your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't ever retain your data for model training purposes.</p><p>If the privacy risk is in the scaffolding, can we bring the scaffolding closer to the user? botchat is an attempt to do just that.</p>
+									<p>Large language models are fundamentally stateless. They do not retain memory of past interactions. Data privacy risks lie in what is done with your data *outside* of the model prompt. </p><p>Does that AI provider use your chat history to train future models? If you shared that sensitive PDF, can someone else access it?</p><p>botchat solves this privacy dilemma by keeping that data on your device. We don't store chats, we don't store attachments, and we ensure that AI providers don't ever retain your data for model training purposes.</p><p>If the privacy risk is in the scaffolding, can we bring the scaffolding closer to the user? botchat is an attempt to do just that.</p>
 								</div>
 							</details>
 							
@@ -128,10 +128,10 @@
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300">
 									<p>Yes. Your chats and attachments are never stored on our servers.</p>
 									<p>Attachments are transmitted to AI providers through BytesIO streams, meaning they never touch disk in our servers.</p>
-									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk"</p>
+									<p>botchat ensures your chat and attachment data is not used for model training by AI providers. There is no "misconfiguration risk".</p>
 									<p>If you're using your own API keys, they are encrypted with AES-256 and stored only in your browser's local storage, and your data retention settings are fully within your control.</p>
 									<p>AI providers retain data briefly for abuse monitoring only.</p>
-									<p>If you have any suggestions that may help improve privacy, please reach out to leo@botchat.ca.</p>
+									<p>If you have any suggestions that may help improve privacy, please reach out to <a href="mailto:leo@botchat.ca" class="text-blue-600 dark:text-blue-400 hover:underline">leo@botchat.ca</a> </p>
 								</div>
 							</details>
 
@@ -180,24 +180,24 @@
 									</svg>
 								</summary>
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
-									<p><strong>What botchat stores:</strong> Nothing. Your chats, prompts, and attachments never touch our servers. Attachments stream directly to AI providers via memory buffers—they're never written to disk on our side. Your chat history lives only in your browser. This means chats don't sync across devices (a deliberate tradeoff, like Signal requiring manual backup).</p>
+									<p><strong>What botchat stores from your chats:</strong> Nothing. Your chats, prompts, and attachments never touch our servers. Attachments stream directly to AI providers via memory buffers—they're never written to disk on our side. Your chat history lives only in your browser. This means chats don't sync across devices (a deliberate tradeoff, like Signal requiring manual backup).</p>
 									
-									<p><strong>What AI providers store:</strong> When you send a message, it goes directly to the AI provider (OpenAI, Anthropic, or Google). By using API endpoints (not consumer chat products), botchat ensures your data is <em>not</em> used for model training—this is the default for API access. However, providers temporarily retain data for <strong>trust &amp; safety</strong> (abuse detection, policy enforcement, legal compliance):</p>
+									<p><strong>What AI providers store from your chats:</strong> When you send a message, it goes directly to the AI provider (OpenAI, Anthropic, or Google). By using API endpoints (not consumer chat products), botchat ensures your data is <em>not</em> used for model training—this is the default for API access. However, providers temporarily retain data for <strong>trust &amp; safety</strong> (abuse detection, policy enforcement, legal compliance):</p>
 									<ul class="list-disc list-inside ml-2 space-y-1">
 										<li><strong>Anthropic (Claude):</strong> Up to 30 days for safety monitoring</li>
 										<li><strong>OpenAI:</strong> Limited retention window for abuse/security (duration varies by tier)</li>
 										<li><strong>Google (Gemini):</strong> Up to 30 days for abuse monitoring (exemptions available)</li>
 									</ul>
 									
-									<p><strong>What this means for you:</strong> Your data isn't used to train AI models. The temporary retention is for safety—detecting misuse, responding to legal obligations—not for improving their products with your content. After the retention window, data is deleted.</p>
+									<p><strong>What this means for you:</strong> Your chat data isn't used to train AI models. The temporary retention is for safety—detecting misuse, responding to legal obligations—not for improving their products with your content. After the retention window, your chatdata is deleted.</p>
 									
 									<p><strong>The uncertainty we can't eliminate:</strong> Provider policies can change. Retention periods may vary by account tier or region. Legal holds can extend retention. We can't audit provider infrastructure. What we <em>can</em> guarantee: botchat grabs every privacy lever the APIs expose, so you get the strongest default protections available without enterprise contracts or manual configuration.</p>
 									
-									<p><strong>Your risk profile:</strong> You accept that prompts/responses may exist briefly on provider infrastructure for safety purposes. You trust that providers honor their published policies. In exchange, you avoid the broader data exposure of consumer chat products (where training opt-outs require manual action and misconfiguration is common).</p>
+									<p><strong>Your risk profile:</strong> You accept that prompts/responses may exist briefly on provider infrastructure for safety purposes. You trust that providers honor their published policies. In exchange, you avoid the broader data exposure of consumer chat products (where training opt-outs require manual action, privacy controls are limited, and misconfiguration is common).</p>
 									
 									<p class="text-sm pt-2"><strong>Dig deeper:</strong>
-										<a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Privacy</a> ·
-										<a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">OpenAI Privacy</a> ·
+										<a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Anthropic Privacy Policy</a> ·
+										<a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">OpenAI Privacy Policy</a> ·
 										<a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline">Gemini API Terms</a>
 									</p>
 								</div>

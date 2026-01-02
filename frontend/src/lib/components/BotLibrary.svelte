@@ -3,6 +3,7 @@
 	import { getMaxOutput, isBotModelValid, validateBotModel } from '$lib/modelLimits';
 	import AlertModal from './AlertModal.svelte';
 	import { getUserItem, setUserItem, removeUserItem } from '$lib/utils/userStorage';
+	import { portal } from '$lib/utils/portal';
 
 	interface Bot {
 		id: string;
@@ -910,9 +911,9 @@
 	{/if}
 </div>
 
-<!-- Clear All Confirmation Modal -->
+<!-- Clear All Confirmation Modal - Portaled to body to avoid clipping in mobile sidebar -->
 {#if showClearConfirmation}
-	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+	<div use:portal class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[200]">
 		<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-sm mx-4">
 			<div class="text-center">
 				<div class="flex justify-center mb-4">
