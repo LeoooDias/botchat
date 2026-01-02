@@ -465,7 +465,8 @@ app.include_router(billing_router)
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Docker and monitoring."""
-    return {"status": "healthy", "service": "botchat-backend"}
+    from app.version import __version__
+    return {"status": "healthy", "service": "botchat-backend", "version": __version__}
 
 
 # CORS Configuration
