@@ -22,6 +22,7 @@ Caching Policy:
 
 from __future__ import annotations
 
+import gc
 import io
 import json
 import logging
@@ -351,14 +352,28 @@ class GeminiProvider:
             error_lower = error_msg.lower()
             
             # Provide user-friendly error messages (sanitized - no raw error in user output)
+            # Use 'from None' to suppress exception context and prevent traceback leakage
             if "429" in error_msg or "quota" in error_lower:
-                raise RateLimitError("Rate limited by Gemini API. Please try again later.")
+                raise RateLimitError("Rate limited by Gemini API. Please try again later.") from None
             elif "401" in error_msg or "403" in error_msg or "permission" in error_lower:
-                raise AuthenticationError("Authentication failed. Please check your credentials.")
+                raise AuthenticationError("Authentication failed. Please check your credentials.") from None
             elif "invalid" in error_lower and "model" in error_lower:
-                raise ModelNotFoundError(f"Model '{model}' is not available.")
+                raise ModelNotFoundError(f"Model '{model}' is not available.") from None
             else:
-                raise GeminiAPIError("Gemini API error. Please try again.")
+                raise GeminiAPIError("Gemini API error. Please try again.") from None
+        finally:
+            # Best-effort memory cleanup for sensitive data
+            # Python doesn't offer secure memory wiping, but explicit deletion
+            # helps garbage collection and reduces exposure window
+            try:
+                del contents
+                if file_data:
+                    for fd in file_data:
+                        if 'bytes' in fd:
+                            fd['bytes'] = None
+                gc.collect()
+            except Exception:
+                pass  # Cleanup is best-effort
     
     def _build_contents(
         self, 

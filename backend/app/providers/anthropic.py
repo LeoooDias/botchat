@@ -15,11 +15,12 @@ Reference: https://www.anthropic.com/policies/privacy
 from __future__ import annotations
 
 import base64
+import gc
 import io
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 import anthropic  # type: ignore[import-untyped]
 
@@ -254,6 +255,7 @@ class AnthropicProvider:
         temperature: float = 1.0,
         user_id: Optional[str] = None,
         enable_prompt_caching: bool = False,
+        pii_scrubber: Optional[Callable[[str], str]] = None,
     ) -> Generator[str, None, None]:
         """
         Stream a response from Anthropic.
@@ -269,6 +271,8 @@ class AnthropicProvider:
                     Should be a hash/UUID, NOT raw PII like email addresses.
             enable_prompt_caching: IGNORED (forced False for privacy). Parameter kept
                                   for API compatibility in case provider defaults change.
+            pii_scrubber: Optional callback function to scrub PII from messages
+                         before sending to the API. Signature: (str) -> str
             
         Yields:
             Text chunks as they arrive
@@ -277,8 +281,20 @@ class AnthropicProvider:
         if model not in SUPPORTED_MODELS:
             logger.warning("Model '%s' not in supported list, attempting anyway", model)
         
+        # Privacy Control: Apply PII scrubbing if configured
+        processed_message = message
+        processed_system = system_instruction
+        if pii_scrubber:
+            processed_message = pii_scrubber(message)
+            if processed_message != message:
+                logger.debug("PII scrubber modified message before sending")
+            if system_instruction:
+                processed_system = pii_scrubber(system_instruction)
+                if processed_system != system_instruction:
+                    logger.debug("PII scrubber modified system_instruction before sending")
+        
         # Build messages
-        messages = self._build_messages(message, model, file_data)
+        messages = self._build_messages(processed_message, model, file_data)
         
         # Validate user_id to ensure it's not raw PII
         validated_user_id = _validate_user_id(user_id)
@@ -296,7 +312,7 @@ class AnthropicProvider:
         if validated_user_id:
             request_params["metadata"] = {"user_id": validated_user_id}
         
-        # Add system instruction
+        # Add system instruction (using processed version if PII scrubber was applied)
         # PRIVACY: Prompt caching is DISABLED regardless of parameter value.
         # We keep the parameter for API compatibility and future-proofing, but
         # force it to False to ensure no data is cached on Anthropic's servers.
@@ -305,8 +321,8 @@ class AnthropicProvider:
         if enable_prompt_caching:
             logger.warning("Prompt caching requested but DISABLED for privacy. Ignoring enable_prompt_caching=True.")
         
-        if system_instruction:
-            request_params["system"] = system_instruction
+        if processed_system:
+            request_params["system"] = processed_system
         
         # Stream response
         try:
@@ -317,23 +333,23 @@ class AnthropicProvider:
         except anthropic.RateLimitError as e:
             logger.error("Anthropic rate limit error (%s)", type(e).__name__)
             logger.debug("Anthropic rate limit: status=%s", getattr(e, "status_code", "n/a"))
-            raise RateLimitError("Rate limited by Anthropic API. Please try again later.")
+            raise RateLimitError("Rate limited by Anthropic API. Please try again later.") from None
         except anthropic.AuthenticationError as e:
             logger.error("Anthropic auth error (%s)", type(e).__name__)
             logger.debug("Anthropic auth: status=%s", getattr(e, "status_code", "n/a"))
-            raise AuthenticationError("Invalid API key. Please check your Anthropic API key.")
+            raise AuthenticationError("Invalid API key. Please check your Anthropic API key.") from None
         except anthropic.BadRequestError as e:
             error_msg = str(e)
             error_lower = error_msg.lower()
             logger.error("Anthropic bad request (%s)", type(e).__name__)
             logger.debug("Anthropic bad request: status=%s", getattr(e, "status_code", "n/a"))
             if "context" in error_lower or "too long" in error_lower:
-                raise ContextLengthError("Message too long for this model's context window.")
-            raise AnthropicAPIError("Bad request to Anthropic API. Please check your input.")
+                raise ContextLengthError("Message too long for this model's context window.") from None
+            raise AnthropicAPIError("Bad request to Anthropic API. Please check your input.") from None
         except anthropic.NotFoundError as e:
             logger.error("Anthropic model not found (%s)", type(e).__name__)
             logger.debug("Anthropic not found: status=%s", getattr(e, "status_code", "n/a"))
-            raise ModelNotFoundError(f"Model '{model}' is not available.")
+            raise ModelNotFoundError(f"Model '{model}' is not available.") from None
         except Exception as e:
             # Tightened logging: avoid leaking prompts via exception strings
             # Extract only safe attributes - NEVER use %r which may expose request content
@@ -341,7 +357,20 @@ class AnthropicProvider:
             error_code = getattr(e, "code", "n/a")
             logger.error("Anthropic streaming error (%s)", type(e).__name__)
             logger.debug("Anthropic error attrs: status=%s, code=%s", status_code, error_code)
-            raise AnthropicAPIError("Anthropic API error. Please try again.")
+            raise AnthropicAPIError("Anthropic API error. Please try again.") from None
+        finally:
+            # Best-effort memory cleanup for sensitive data
+            # Python doesn't offer secure memory wiping, but explicit deletion
+            # helps garbage collection and reduces exposure window
+            try:
+                del messages
+                if file_data:
+                    for fd in file_data:
+                        if 'bytes' in fd:
+                            fd['bytes'] = None
+                gc.collect()
+            except Exception:
+                pass  # Cleanup is best-effort
     
     def _build_messages(
         self,

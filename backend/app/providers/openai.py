@@ -20,11 +20,12 @@ Transparency is key - we communicate these limitations clearly to users.
 from __future__ import annotations
 
 import base64
+import gc
 import io
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from openai import OpenAI, Stream  # type: ignore[import-untyped]
 from openai.types.chat import ChatCompletionChunk  # type: ignore[import-untyped]
@@ -262,6 +263,7 @@ class OpenAIProvider:
         file_data: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 1.0,
         user_id: Optional[str] = None,
+        pii_scrubber: Optional[Callable[[str], str]] = None,
     ) -> Generator[str, None, None]:
         """
         Stream a response from OpenAI.
@@ -276,6 +278,8 @@ class OpenAIProvider:
             user_id: Optional hashed user ID for privacy-preserving abuse monitoring.
                     Should be a hash/UUID, NOT raw PII like email addresses.
                     Sent as safety_identifier to OpenAI.
+            pii_scrubber: Optional callback function to scrub PII from messages
+                         before sending to the API. Signature: (str) -> str
             
         Yields:
             Text chunks as they arrive
@@ -284,8 +288,20 @@ class OpenAIProvider:
         if model not in SUPPORTED_MODELS:
             logger.warning("Model '%s' not in supported list, attempting anyway", model)
         
+        # Privacy Control: Apply PII scrubbing if configured
+        processed_message = message
+        processed_system = system_instruction
+        if pii_scrubber:
+            processed_message = pii_scrubber(message)
+            if processed_message != message:
+                logger.debug("PII scrubber modified message before sending")
+            if system_instruction:
+                processed_system = pii_scrubber(system_instruction)
+                if processed_system != system_instruction:
+                    logger.debug("PII scrubber modified system_instruction before sending")
+        
         # Build messages
-        messages = self._build_messages(message, model, system_instruction, file_data)
+        messages = self._build_messages(processed_message, model, processed_system, file_data)
         
         # Validate user_id to ensure it's not raw PII
         validated_user_id = _validate_user_id(user_id)
@@ -339,18 +355,32 @@ class OpenAIProvider:
             error_lower = error_msg.lower()
             
             # Provide user-friendly error messages (sanitized - no raw error in user output)
+            # Use 'from None' to suppress exception context and prevent traceback leakage
             if "429" in error_msg or "rate" in error_lower:
-                raise RateLimitError("Rate limited by OpenAI API. Please try again later.")
+                raise RateLimitError("Rate limited by OpenAI API. Please try again later.") from None
             elif "401" in error_msg or "invalid_api_key" in error_lower:
-                raise AuthenticationError("Invalid API key. Please check your OpenAI API key.")
+                raise AuthenticationError("Invalid API key. Please check your OpenAI API key.") from None
             elif "403" in error_msg or "permission" in error_lower:
-                raise AuthenticationError("Permission denied. Your API key may lack required permissions.")
+                raise AuthenticationError("Permission denied. Your API key may lack required permissions.") from None
             elif "model" in error_lower and ("not found" in error_lower or "does not exist" in error_lower):
-                raise ModelNotFoundError(f"Model '{model}' is not available.")
+                raise ModelNotFoundError(f"Model '{model}' is not available.") from None
             elif "context_length" in error_lower or "maximum context" in error_lower:
-                raise ContextLengthError("Message too long for this model's context window.")
+                raise ContextLengthError("Message too long for this model's context window.") from None
             else:
-                raise OpenAIAPIError("OpenAI API error. Please try again.")
+                raise OpenAIAPIError("OpenAI API error. Please try again.") from None
+        finally:
+            # Best-effort memory cleanup for sensitive data
+            # Python doesn't offer secure memory wiping, but explicit deletion
+            # helps garbage collection and reduces exposure window
+            try:
+                del messages
+                if file_data:
+                    for fd in file_data:
+                        if 'bytes' in fd:
+                            fd['bytes'] = None
+                gc.collect()
+            except Exception:
+                pass  # Cleanup is best-effort
     
     def _build_messages(
         self,
