@@ -1,10 +1,10 @@
-<script lang="ts">	import '../app.css';
+<script lang="ts">
+	import '../app.css';
 
 	let { children } = $props();
 	
-	// Version injected at build time by Vite
-	declare const __APP_VERSION__: string;
-	const appVersion = __APP_VERSION__;
+	// Version injected at build time by Vite (defined in vite.config.ts)
+	const appVersion = (globalThis as Record<string, unknown>).__APP_VERSION__ as string ?? 'dev';
 </script>
 
 <svelte:head>

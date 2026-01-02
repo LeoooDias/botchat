@@ -60,7 +60,7 @@
 
 	// Touch handlers for swipe-to-delete
 	function handleTouchStart(e: TouchEvent, id: string) {
-		if (renamingId || deleteConfirmId) return;
+		if (renamingId) return;
 		
 		// If tapping on a different item, close the revealed one
 		if (revealedId && revealedId !== id) {
