@@ -74,7 +74,7 @@
 							<li>No AI provider data retention for model training</li>							
 							<li>Customizable personalities and instructions per bot</li>
 							<li>File attachments and PDF support (your attachments never touch botchat servers)</li>
-							<li>Privacy by design: botchat obsesses over privacy settings in AI provider APIs)</li>
+							<li>Privacy by design: botchat obsesses over privacy settings in AI provider APIs</li>
 							<li>BYOK: take full control by using your own API keys, stored safely in your browser</li>
 							<li>botchat never shares your personal data with third parties</li>
 						</ul>
