@@ -9,6 +9,11 @@ Privacy & Data Handling:
 - Platform usage: botchat does NOT have ZDR agreement (data retained up to 30 days)
 - BYOK usage: ZDR honored only if user's org has ZDR agreement with OpenAI
 
+Storage & Caching Policy:
+- store=False: Explicitly disabled on every request (prevents distillation/evals storage)
+- prompt_cache_key: NOT set (no prompt caching)
+- prompt_cache_retention: NOT set (no extended cache TTL)
+
 Transparency is key - we communicate these limitations clearly to users.
 """
 
@@ -32,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 # Platform API key (from environment/secrets)
 PLATFORM_OPENAI_KEY = os.environ.get("PLATFORM_OPENAI_API_KEY", "")
+
+# Request timeout (seconds) - generous default for streaming responses
+# Can be overridden via environment variable for different deployment contexts
+DEFAULT_REQUEST_TIMEOUT = float(os.environ.get("OPENAI_REQUEST_TIMEOUT", "120"))
 
 # Supported models (as of Dec 2025)
 SUPPORTED_MODELS = {
@@ -128,6 +137,57 @@ def _strip_exif_metadata(image_bytes: bytes, mime_type: str) -> bytes:
         return image_bytes
 
 
+# Patterns that indicate raw PII was passed as user_id (should be hashed)
+_PII_PATTERNS_FOR_USER_ID = [
+    (r"^[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}$", "email"),  # Email addresses
+    (r"^\d{3}-\d{2}-\d{4}$", "SSN"),  # US SSN
+    (r"^\d{9}$", "SSN"),  # US SSN without dashes
+    (r"^\+?1?[-.]?\(?\d{3}\)?[-.]?\d{3}[-.]?\d{4}$", "phone"),  # US phone
+    (r"^\d{16}$", "credit_card"),  # Credit card (16 digits)
+    (r"^\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}$", "credit_card"),  # Credit card with separators
+]
+
+
+def _validate_user_id(user_id: Optional[str]) -> Optional[str]:
+    """
+    Validate user_id to ensure it's not raw PII.
+    
+    User IDs should be hashed/opaque identifiers, NOT raw PII like email addresses.
+    This function rejects obvious PII patterns and returns None (effectively
+    disabling user tracking for that request) while logging a warning.
+    
+    Args:
+        user_id: The user identifier to validate
+        
+    Returns:
+        The user_id if valid, None if it appears to be PII
+    """
+    import re
+    
+    if not user_id:
+        return None
+    
+    # Check for obvious PII patterns
+    for pattern, pii_type in _PII_PATTERNS_FOR_USER_ID:
+        if re.match(pattern, user_id.strip()):
+            logger.warning(
+                "user_id appears to be raw PII (%s pattern detected). "
+                "Please use hashed identifiers. Ignoring user_id for this request.",
+                pii_type
+            )
+            return None
+    
+    # Additional heuristic: reject if it looks like a name (has spaces and common name patterns)
+    if " " in user_id and len(user_id) < 50:
+        logger.warning(
+            "user_id appears to be a name (contains spaces). "
+            "Please use hashed identifiers. Ignoring user_id for this request."
+        )
+        return None
+    
+    return user_id
+
+
 @dataclass
 class OpenAIConfig:
     """Configuration for OpenAI requests."""
@@ -154,15 +214,17 @@ class OpenAIProvider:
             print(chunk, end="")
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, strip_metadata: bool = True):
         """
         Initialize OpenAI provider.
         
         Args:
             api_key: Optional user API key. If not provided, uses platform key.
+            strip_metadata: If True, don't log filenames/sensitive metadata (default: True).
         """
         self.api_key = api_key or PLATFORM_OPENAI_KEY
         self.is_byok = api_key is not None
+        self.strip_metadata = strip_metadata
         
         if not self.api_key:
             raise OpenAIConfigError("No OpenAI API key available (neither BYOK nor platform)")
@@ -172,6 +234,7 @@ class OpenAIProvider:
         # NOTE: X-Stainless-* headers are SDK telemetry - we suppress them for privacy
         self.client = OpenAI(
             api_key=self.api_key,
+            timeout=DEFAULT_REQUEST_TIMEOUT,  # Explicit timeout for reliability
             default_headers={
                 "X-OpenAI-No-Store": "true",  # Request ZDR (best-effort, not guaranteed)
                 # Minimize SDK telemetry headers (privacy-forward)
@@ -198,6 +261,7 @@ class OpenAIProvider:
         max_tokens: int = 4000,
         file_data: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 1.0,
+        user_id: Optional[str] = None,
     ) -> Generator[str, None, None]:
         """
         Stream a response from OpenAI.
@@ -209,6 +273,9 @@ class OpenAIProvider:
             max_tokens: Maximum output tokens
             file_data: Optional list of file attachments [{bytes, mime_type, name}]
             temperature: Sampling temperature (0.0-2.0)
+            user_id: Optional hashed user ID for privacy-preserving abuse monitoring.
+                    Should be a hash/UUID, NOT raw PII like email addresses.
+                    Sent as safety_identifier to OpenAI.
             
         Yields:
             Text chunks as they arrive
@@ -220,6 +287,9 @@ class OpenAIProvider:
         # Build messages
         messages = self._build_messages(message, model, system_instruction, file_data)
         
+        # Validate user_id to ensure it's not raw PII
+        validated_user_id = _validate_user_id(user_id)
+        
         # Build request parameters
         # IMPORTANT: store=False disables OpenAI's request/response storage
         # This is the primary privacy control (X-OpenAI-No-Store is best-effort only)
@@ -229,6 +299,16 @@ class OpenAIProvider:
             "stream": True,
             "store": False,  # Disable application state storage
         }
+        
+        # PRIVACY: Explicitly disable prompt caching by not setting prompt_cache_key
+        # OpenAI's prompt caching requires a cache key to be set; without it, no caching occurs.
+        # We intentionally do NOT set prompt_cache_key or prompt_cache_retention.
+        # If OpenAI changes defaults in the future, we should revisit this.
+        
+        # Add validated user ID for privacy-preserving abuse monitoring
+        # This helps OpenAI with abuse detection without storing PII
+        if validated_user_id:
+            request_params["safety_identifier"] = validated_user_id
         
         # Add optional parameters (some models don't support all params)
         if model not in NO_SYSTEM_INSTRUCTION_MODELS:
@@ -248,10 +328,12 @@ class OpenAIProvider:
                     
         except Exception as e:
             # Tightened logging: avoid leaking prompts via exception strings
-            # Log type + status code only; full detail goes to debug level
+            # Extract only safe attributes - NEVER use %r which may expose request content
             status_code = getattr(e, "status_code", "n/a")
+            error_code = getattr(e, "code", "n/a")
+            error_type = getattr(e, "type", "n/a")
             logger.error("OpenAI streaming error (%s, status=%s)", type(e).__name__, status_code)
-            logger.debug("OpenAI streaming error detail: %r", e)
+            logger.debug("OpenAI error attrs: code=%s, type=%s", error_code, error_type)
             
             error_msg = str(e)
             error_lower = error_msg.lower()
@@ -317,8 +399,14 @@ class OpenAIProvider:
                             "detail": "auto",  # Let OpenAI choose resolution
                         }
                     })
-                    logger.debug("Added image to request: %s (%s, %d bytes, EXIF stripped)", 
-                               filename, mime_type, len(clean_bytes))
+                    
+                    # Conditional logging based on privacy settings
+                    if not self.strip_metadata:
+                        logger.debug("Added image to request: %s (%s, %d bytes, EXIF stripped)", 
+                                   filename, mime_type, len(clean_bytes))
+                    else:
+                        logger.debug("Added image (%s, %d bytes, EXIF stripped)",
+                                   mime_type, len(clean_bytes))
             
             # Add text part
             content_parts.append({
@@ -353,6 +441,25 @@ class OpenAIProvider:
             "provider_name": "OpenAI",
             "docs_url": "https://openai.com/policies/api-data-usage-policies",
             "zdr_header_sent": True,  # We always send X-OpenAI-No-Store
+            # Caching disclosure
+            "caching_info": {
+                "prompt_caching_enabled": False,
+                "prompt_cache_key_set": False,
+                "description": "Prompt caching is explicitly disabled (no cache key set). store=false prevents request storage.",
+                "user_notice": "Your prompts are not cached. store=false is set on every request.",
+            },
+            # Data residency info
+            "data_residency": {
+                "region": "OpenAI-managed (US-based infrastructure)",
+                "configurable": False,
+                "note": "OpenAI does not offer region selection for API requests",
+            },
+            # Privacy features
+            "privacy_features": {
+                "exif_stripping": True,  # We strip EXIF from images
+                "user_id_validation": True,  # We validate user_id is not raw PII
+                "filename_redaction": True,  # strip_metadata defaults to True
+            },
         }
         
         if is_byok:
@@ -431,6 +538,7 @@ def stream_openai(
     max_tokens: int = 4000,
     file_data: Optional[List[Dict[str, Any]]] = None,
     temperature: float = 1.0,
+    user_id: Optional[str] = None,
 ) -> Generator[str, None, None]:
     """
     Stream an OpenAI response.
@@ -445,6 +553,7 @@ def stream_openai(
         max_tokens: Maximum output tokens
         file_data: Optional file attachments
         temperature: Sampling temperature
+        user_id: Optional hashed user ID for privacy-preserving abuse monitoring
         
     Yields:
         Text chunks
@@ -457,6 +566,7 @@ def stream_openai(
         max_tokens=max_tokens,
         file_data=file_data,
         temperature=temperature,
+        user_id=user_id,
     )
 
 

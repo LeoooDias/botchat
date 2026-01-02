@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 # Platform API key (from environment/secrets)
 PLATFORM_ANTHROPIC_KEY = os.environ.get("PLATFORM_ANTHROPIC_API_KEY", "")
 
+# Request timeout (seconds) - generous default for streaming responses
+# Can be overridden via environment variable for different deployment contexts
+DEFAULT_REQUEST_TIMEOUT = float(os.environ.get("ANTHROPIC_REQUEST_TIMEOUT", "120"))
+
 # Supported models (as of Dec 2025)
 SUPPORTED_MODELS = {
     # Claude 4 family (2025)
@@ -125,6 +129,57 @@ def _strip_exif_metadata(image_bytes: bytes, mime_type: str) -> bytes:
         return image_bytes
 
 
+# Patterns that indicate raw PII was passed as user_id (should be hashed)
+_PII_PATTERNS_FOR_USER_ID = [
+    (r"^[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}$", "email"),  # Email addresses
+    (r"^\d{3}-\d{2}-\d{4}$", "SSN"),  # US SSN
+    (r"^\d{9}$", "SSN"),  # US SSN without dashes
+    (r"^\+?1?[-.]?\(?\d{3}\)?[-.]?\d{3}[-.]?\d{4}$", "phone"),  # US phone
+    (r"^\d{16}$", "credit_card"),  # Credit card (16 digits)
+    (r"^\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}$", "credit_card"),  # Credit card with separators
+]
+
+
+def _validate_user_id(user_id: Optional[str]) -> Optional[str]:
+    """
+    Validate user_id to ensure it's not raw PII.
+    
+    User IDs should be hashed/opaque identifiers, NOT raw PII like email addresses.
+    This function rejects obvious PII patterns and returns None (effectively
+    disabling user tracking for that request) while logging a warning.
+    
+    Args:
+        user_id: The user identifier to validate
+        
+    Returns:
+        The user_id if valid, None if it appears to be PII
+    """
+    import re
+    
+    if not user_id:
+        return None
+    
+    # Check for obvious PII patterns
+    for pattern, pii_type in _PII_PATTERNS_FOR_USER_ID:
+        if re.match(pattern, user_id.strip()):
+            logger.warning(
+                "user_id appears to be raw PII (%s pattern detected). "
+                "Please use hashed identifiers. Ignoring user_id for this request.",
+                pii_type
+            )
+            return None
+    
+    # Additional heuristic: reject if it looks like a name (has spaces and common name patterns)
+    if " " in user_id and len(user_id) < 50:
+        logger.warning(
+            "user_id appears to be a name (contains spaces). "
+            "Please use hashed identifiers. Ignoring user_id for this request."
+        )
+        return None
+    
+    return user_id
+
+
 @dataclass
 class AnthropicConfig:
     """Configuration for Anthropic requests."""
@@ -133,7 +188,7 @@ class AnthropicConfig:
     max_tokens: int = DEFAULT_MAX_TOKENS
     temperature: float = 1.0
     strip_metadata: bool = True  # Privacy: don't log filenames by default
-    enable_prompt_caching: bool = False  # Privacy: explicit opt-in for prompt caching
+    enable_prompt_caching: bool = False  # IGNORED: forced False for privacy
 
 
 class AnthropicProvider:
@@ -173,8 +228,11 @@ class AnthropicProvider:
         if not self.api_key:
             raise AnthropicConfigError("No Anthropic API key available (neither BYOK nor platform)")
         
-        # Create client with optional additional headers
-        client_kwargs: Dict[str, Any] = {"api_key": self.api_key}
+        # Create client with optional additional headers and explicit timeout
+        client_kwargs: Dict[str, Any] = {
+            "api_key": self.api_key,
+            "timeout": DEFAULT_REQUEST_TIMEOUT,  # Explicit timeout for reliability
+        }
         if additional_headers:
             client_kwargs["default_headers"] = additional_headers
         
@@ -209,8 +267,8 @@ class AnthropicProvider:
             temperature: Sampling temperature (0.0-1.0)
             user_id: Optional hashed user ID for privacy-preserving abuse monitoring.
                     Should be a hash/UUID, NOT raw PII like email addresses.
-            enable_prompt_caching: If True, enable ephemeral prompt caching for system
-                                  instructions (explicit opt-in for privacy).
+            enable_prompt_caching: IGNORED (forced False for privacy). Parameter kept
+                                  for API compatibility in case provider defaults change.
             
         Yields:
             Text chunks as they arrive
@@ -222,6 +280,9 @@ class AnthropicProvider:
         # Build messages
         messages = self._build_messages(message, model, file_data)
         
+        # Validate user_id to ensure it's not raw PII
+        validated_user_id = _validate_user_id(user_id)
+        
         # Build request parameters
         request_params: Dict[str, Any] = {
             "model": model,
@@ -230,26 +291,22 @@ class AnthropicProvider:
             "temperature": temperature,
         }
         
-        # Add hashed user ID for privacy-preserving abuse monitoring
+        # Add validated user ID for privacy-preserving abuse monitoring
         # This helps Anthropic with rate limiting and abuse detection without storing PII
-        if user_id:
-            request_params["metadata"] = {"user_id": user_id}
+        if validated_user_id:
+            request_params["metadata"] = {"user_id": validated_user_id}
         
-        # Add system instruction (with optional prompt caching)
+        # Add system instruction
+        # PRIVACY: Prompt caching is DISABLED regardless of parameter value.
+        # We keep the parameter for API compatibility and future-proofing, but
+        # force it to False to ensure no data is cached on Anthropic's servers.
+        # If Anthropic changes their default caching behavior, this explicit
+        # handling ensures we remain in a no-cache state.
+        if enable_prompt_caching:
+            logger.warning("Prompt caching requested but DISABLED for privacy. Ignoring enable_prompt_caching=True.")
+        
         if system_instruction:
-            if enable_prompt_caching:
-                # Use caching format - cache_control: ephemeral means it can be cached
-                # but will be automatically evicted (not persisted long-term)
-                request_params["system"] = [
-                    {
-                        "type": "text",
-                        "text": system_instruction,
-                        "cache_control": {"type": "ephemeral"}
-                    }
-                ]
-                logger.debug("Using ephemeral prompt caching for system instruction")
-            else:
-                request_params["system"] = system_instruction
+            request_params["system"] = system_instruction
         
         # Stream response
         try:
@@ -259,28 +316,31 @@ class AnthropicProvider:
                     
         except anthropic.RateLimitError as e:
             logger.error("Anthropic rate limit error (%s)", type(e).__name__)
-            logger.debug("Anthropic rate limit detail: %r", e)
+            logger.debug("Anthropic rate limit: status=%s", getattr(e, "status_code", "n/a"))
             raise RateLimitError("Rate limited by Anthropic API. Please try again later.")
         except anthropic.AuthenticationError as e:
             logger.error("Anthropic auth error (%s)", type(e).__name__)
-            logger.debug("Anthropic auth error detail: %r", e)
+            logger.debug("Anthropic auth: status=%s", getattr(e, "status_code", "n/a"))
             raise AuthenticationError("Invalid API key. Please check your Anthropic API key.")
         except anthropic.BadRequestError as e:
             error_msg = str(e)
             error_lower = error_msg.lower()
             logger.error("Anthropic bad request (%s)", type(e).__name__)
-            logger.debug("Anthropic bad request detail: %r", e)
+            logger.debug("Anthropic bad request: status=%s", getattr(e, "status_code", "n/a"))
             if "context" in error_lower or "too long" in error_lower:
                 raise ContextLengthError("Message too long for this model's context window.")
             raise AnthropicAPIError("Bad request to Anthropic API. Please check your input.")
         except anthropic.NotFoundError as e:
             logger.error("Anthropic model not found (%s)", type(e).__name__)
-            logger.debug("Anthropic not found detail: %r", e)
+            logger.debug("Anthropic not found: status=%s", getattr(e, "status_code", "n/a"))
             raise ModelNotFoundError(f"Model '{model}' is not available.")
         except Exception as e:
             # Tightened logging: avoid leaking prompts via exception strings
+            # Extract only safe attributes - NEVER use %r which may expose request content
+            status_code = getattr(e, "status_code", "n/a")
+            error_code = getattr(e, "code", "n/a")
             logger.error("Anthropic streaming error (%s)", type(e).__name__)
-            logger.debug("Anthropic streaming error detail: %r", e)
+            logger.debug("Anthropic error attrs: status=%s, code=%s", status_code, error_code)
             raise AnthropicAPIError("Anthropic API error. Please try again.")
     
     def _build_messages(
@@ -360,8 +420,23 @@ class AnthropicProvider:
             },
             "privacy_features": {
                 "user_id_support": True,  # Hashed user IDs for abuse monitoring
+                "user_id_validation": True,  # We validate user_id is not raw PII
                 "prompt_caching": "opt-in",  # Ephemeral caching available
                 "exif_stripping": True,  # We strip EXIF from images
+                "filename_redaction": True,  # strip_metadata defaults to True
+            },
+            # Caching disclosure
+            "caching_info": {
+                "prompt_caching_enabled": False,
+                "explicit_disabled": True,
+                "description": "Prompt caching is explicitly DISABLED regardless of parameter value. enable_prompt_caching parameter is ignored.",
+                "user_notice": "Your prompts are not cached on Anthropic servers.",
+            },
+            # Data residency info
+            "data_residency": {
+                "region": "Anthropic-managed infrastructure",
+                "configurable": False,
+                "note": "Anthropic does not offer region selection for standard API",
             },
             "recommendations": [
                 "Use hashed user IDs (not raw PII) for abuse monitoring",
@@ -457,7 +532,7 @@ def stream_anthropic(
         file_data: Optional file attachments
         temperature: Sampling temperature
         user_id: Optional hashed user ID for privacy-preserving abuse monitoring
-        enable_prompt_caching: If True, enable ephemeral prompt caching
+        enable_prompt_caching: IGNORED (forced False for privacy)
         
     Yields:
         Text chunks

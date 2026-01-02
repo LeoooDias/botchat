@@ -10,6 +10,14 @@ Both use Google's unified SDK (google-genai) for consistent behavior.
 Privacy & Data Handling:
 - Vertex AI: Enterprise-grade, data processed in specified region
 - AI Studio: Consumer API, may be used for model improvements (free tier)
+
+Caching Policy:
+- EXPLICIT CACHING: We do NOT use client.caches.create() or cached_content.
+  All requests are stateless with no server-side content persistence.
+- IMPLICIT CACHING: Google enables this automatically (as of May 2025) for
+  cost optimization. There is NO client-side opt-out. Google states this is
+  transient and used only for billing optimization, not data retention.
+  See: https://ai.google.dev/gemini-api/docs/caching
 """
 
 from __future__ import annotations
@@ -38,6 +46,10 @@ VERTEX_REGION = os.environ.get("GOOGLE_CLOUD_REGION", "us-central1")
 
 # Service account credentials (JSON string from Secret Manager)
 VERTEX_SERVICE_ACCOUNT_JSON = os.environ.get("VERTEX_AI_SERVICE_ACCOUNT", "")
+
+# Request timeout (seconds) - generous default for streaming responses
+# Can be overridden via environment variable for different deployment contexts
+DEFAULT_REQUEST_TIMEOUT = float(os.environ.get("GEMINI_REQUEST_TIMEOUT", "120"))
 
 # Supported models (as of Dec 2025)
 SUPPORTED_MODELS = {
@@ -146,6 +158,7 @@ class GeminiProvider:
         api_key: Optional[str] = None,
         allowed_regions: Optional[List[str]] = None,
         pii_scrubber: Optional[Callable[[str], str]] = None,
+        strip_metadata: bool = True,
     ):
         """
         Initialize Gemini provider.
@@ -158,9 +171,11 @@ class GeminiProvider:
                            configured region is not in the list, raises ValueError.
             pii_scrubber: Optional callback function to scrub PII from messages
                          before sending to the API. Signature: (str) -> str
+            strip_metadata: If True, don't log filenames/sensitive metadata (default: True).
         """
         self.api_key = api_key
         self.pii_scrubber = pii_scrubber
+        self.strip_metadata = strip_metadata
         self.backend = "ai_studio" if api_key else "vertex_ai"
         
         # Privacy Control: Enforce region allow-list for Vertex AI
@@ -181,10 +196,19 @@ class GeminiProvider:
         
     def _create_client(self) -> genai.Client:
         """Create the appropriate genai client based on auth method."""
+        # HTTP options with explicit timeout for reliability
+        # Note: google-genai SDK uses milliseconds for timeout
+        http_options = types.HttpOptions(
+            timeout=int(DEFAULT_REQUEST_TIMEOUT * 1000),
+        )
+        
         if self.api_key:
             # AI Studio: Use API key
             logger.debug("Creating AI Studio client with API key")
-            return genai.Client(api_key=self.api_key)
+            return genai.Client(
+                api_key=self.api_key,
+                http_options=http_options,
+            )
         else:
             # Vertex AI: Use service account credentials
             logger.debug("Creating Vertex AI client for project=%s, region=%s", 
@@ -203,6 +227,7 @@ class GeminiProvider:
                         project=VERTEX_PROJECT,
                         location=VERTEX_REGION,
                         credentials=credentials,
+                        http_options=http_options,
                     )
                 except json.JSONDecodeError as e:
                     logger.error("Failed to parse VERTEX_AI_SERVICE_ACCOUNT JSON: %s", e)
@@ -215,6 +240,7 @@ class GeminiProvider:
                     vertexai=True,
                     project=VERTEX_PROJECT,
                     location=VERTEX_REGION,
+                    http_options=http_options,
                 )
     
     def stream(
@@ -292,7 +318,13 @@ class GeminiProvider:
         )
         
         if system_instruction:
-            config.system_instruction = system_instruction
+            # Apply PII scrubber to system_instruction as well
+            processed_system_instruction = system_instruction
+            if self.pii_scrubber:
+                processed_system_instruction = self.pii_scrubber(system_instruction)
+                if processed_system_instruction != system_instruction:
+                    logger.debug("PII scrubber modified system_instruction before sending")
+            config.system_instruction = processed_system_instruction
         
         # Stream response
         try:
@@ -308,10 +340,12 @@ class GeminiProvider:
                     
         except Exception as e:
             # Tightened logging: avoid leaking prompts via exception strings
+            # Extract only safe attributes - NEVER use %r which may expose request content
             status_code = getattr(e, "status_code", getattr(e, "code", "n/a"))
+            error_reason = getattr(e, "reason", "n/a")
             logger.error("Gemini streaming error (%s, %s, status=%s)", 
                         self.backend, type(e).__name__, status_code)
-            logger.debug("Gemini streaming error detail: %r", e)
+            logger.debug("Gemini error attrs: reason=%s", error_reason)
             
             error_msg = str(e)
             error_lower = error_msg.lower()
@@ -355,8 +389,13 @@ class GeminiProvider:
                     # Strip EXIF metadata from images for privacy
                     if mime_type.startswith("image/"):
                         file_bytes = _strip_exif_metadata(file_bytes, mime_type)
-                        logger.debug("Added image to request: %s (%s, %d bytes, EXIF stripped)",
-                                   filename, mime_type, len(file_bytes))
+                        # Conditional logging based on privacy settings
+                        if not self.strip_metadata:
+                            logger.debug("Added image to request: %s (%s, %d bytes, EXIF stripped)",
+                                       filename, mime_type, len(file_bytes))
+                        else:
+                            logger.debug("Added image (%s, %d bytes, EXIF stripped)",
+                                       mime_type, len(file_bytes))
                     
                     # PRIVACY: Use inline data (from_bytes), NOT file URIs
                     # This ensures file data is ephemeral and not persisted
@@ -381,6 +420,13 @@ class GeminiProvider:
             "provider": "gemini",
             "provider_name": "Google Gemini",
             "docs_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/data-governance",
+            # Privacy features (common)
+            "privacy_features": {
+                "pii_scrubber_support": True,  # Optional callback for PII redaction
+                "exif_stripping": True,  # We strip EXIF from images
+                "filename_redaction": True,  # strip_metadata defaults to True
+                "inline_data_only": True,  # We use inline data, NOT File API (no persistence)
+            },
         }
         
         # Vertex AI privacy (platform usage)
@@ -394,6 +440,21 @@ class GeminiProvider:
             "compliance": ["SOC 2", "ISO 27001", "HIPAA eligible"],
             "privacy_summary": "Enterprise Vertex AI - Data not used for training, processed in specified region",
             "privacy_level": "high",
+            # Caching disclosure
+            "caching_info": {
+                "implicit_caching": True,
+                "opt_out_available": False,
+                "description": "Gemini uses implicit prompt caching for performance. There is no opt-out mechanism.",
+                "explicit_caching_used": False,  # We don't use explicit/context caching
+                "user_notice": "Your prompts may be cached server-side for performance optimization. This is automatic and cannot be disabled.",
+            },
+            # Data residency info (Vertex AI has control)
+            "data_residency": {
+                "region": VERTEX_REGION,
+                "configurable": True,
+                "region_allowlist_enforced": True,  # We enforce allowed_regions parameter
+                "note": f"Data processed in {VERTEX_REGION}. Region can be configured at deployment time.",
+            },
         }
         
         # AI Studio privacy (BYOK usage)
@@ -408,6 +469,20 @@ class GeminiProvider:
             "privacy_summary": "AI Studio API - Paid tier data not used for training, free tier may be used",
             "privacy_level": "medium",
             "free_tier_warning": "Free tier usage may be used for model improvements",
+            # Caching disclosure
+            "caching_info": {
+                "implicit_caching": True,
+                "opt_out_available": False,
+                "description": "Gemini uses implicit prompt caching for performance. There is no opt-out mechanism.",
+                "explicit_caching_used": False,  # We don't use explicit/context caching
+                "user_notice": "Your prompts may be cached server-side for performance optimization. This is automatic and cannot be disabled.",
+            },
+            # Data residency info (AI Studio has no control)
+            "data_residency": {
+                "region": "Google-managed (varies)",
+                "configurable": False,
+                "note": "AI Studio does not offer region selection",
+            },
         }
         
         return {
