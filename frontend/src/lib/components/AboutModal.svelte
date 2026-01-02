@@ -40,15 +40,29 @@
 			<!-- Header -->
 			<div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
 				<h2 id="about-title" class="text-2xl font-bold text-gray-900 dark:text-white">About botchat</h2>
-				<button
-					on:click={handleClose}
-					class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
-					aria-label="Close"
-				>
-					<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-					</svg>
-				</button>
+				<div class="flex items-center gap-3">
+					<a 
+						href="/terms" 
+						class="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
+					>
+						Terms
+					</a>
+					<a 
+						href="/privacy" 
+						class="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition"
+					>
+						Privacy
+					</a>
+					<button
+						on:click={handleClose}
+						class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+						aria-label="Close"
+					>
+						<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
 			</div>
 
 			<!-- Scrollable Content -->

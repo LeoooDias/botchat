@@ -1940,7 +1940,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						</button>
 						
 						<p class="text-xs text-gray-400 dark:text-gray-500">
-							By signing in, you agree to our <a href="/terms" class="underline hover:text-gray-600 dark:hover:text-gray-300">Terms of Service</a>.
+							By signing in, you agree to our <a href="/terms" class="underline hover:text-gray-600 dark:hover:text-gray-300">Terms of Service</a> and <a href="/privacy" class="underline hover:text-gray-600 dark:hover:text-gray-300">Privacy Statement</a>.
 						</p>
 						
 						<p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
@@ -2096,9 +2096,16 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			</div>
 			
 			<!-- Copyright Footer -->
-			<div class="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500">
-				<p>Created by <a href="mailto:leo@botchat.ca" class="hover:text-blue-500">Leo Dias</a></p>
-				<p>© 2025</p>
+			<div class="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 flex items-center justify-between">
+				<div>
+					<p>Created by <a href="mailto:leo@botchat.ca" class="hover:text-blue-500">Leo Dias</a></p>
+					<p>© 2025</p>
+				</div>
+				<div class="flex gap-2">
+					<a href="/terms" class="hover:text-blue-500">Terms</a>
+					<span>·</span>
+					<a href="/privacy" class="hover:text-blue-500">Privacy</a>
+				</div>
 			</div>
 		</div>
 		{/if}

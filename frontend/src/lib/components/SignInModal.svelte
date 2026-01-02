@@ -121,7 +121,7 @@
 
 			<!-- Footer -->
 			<p class="mt-6 text-xs text-center text-gray-500 dark:text-gray-400">
-				By signing in, you agree to our <a href="/terms" class="underline hover:text-gray-600 dark:hover:text-gray-300">Terms of Service</a>.
+				By signing in, you agree to our <a href="/terms" class="underline hover:text-gray-600 dark:hover:text-gray-300">Terms of Service</a> and <a href="/privacy" class="underline hover:text-gray-600 dark:hover:text-gray-300">Privacy Statement</a>.
 			</p>
 		</div>
 	</div>
