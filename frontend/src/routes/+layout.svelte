@@ -4,7 +4,8 @@
 	let { children } = $props();
 	
 	// Version injected at build time by Vite (defined in vite.config.ts)
-	const appVersion = (globalThis as Record<string, unknown>).__APP_VERSION__ as string ?? 'dev';
+	// @ts-ignore - __APP_VERSION__ is injected by Vite at build time
+	const appVersion: string = __APP_VERSION__;
 </script>
 
 <svelte:head>
