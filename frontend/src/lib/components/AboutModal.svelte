@@ -137,6 +137,76 @@
 
 							<details class="group border border-gray-200 dark:border-gray-700 rounded-lg">
 								<summary class="flex items-center justify-between cursor-pointer px-4 py-3 font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg">
+									<span>How does botchat protect my privacy?</span>
+									<svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+									</svg>
+								</summary>
+								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
+									<p>botchat implements an extensive set of privacy protections at every layer. Here's the full list:</p>
+									
+									<p><strong>🚫 AI Provider Training Opt-Outs</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>OpenAI:</strong> <code>store=False</code> parameter explicitly set on every request—prevents your data from being stored for distillation, evaluations, or training</li>
+										<li><strong>OpenAI:</strong> <code>X-OpenAI-No-Store</code> header sent with every request—requests Zero Data Retention (honored for enterprise agreements)</li>
+										<li><strong>OpenAI:</strong> Prompt caching explicitly disabled—we never set <code>prompt_cache_key</code> or <code>prompt_cache_retention</code></li>
+										<li><strong>Anthropic:</strong> API usage is excluded from model training by default per Anthropic's policy</li>
+										<li><strong>Google Gemini:</strong> Vertex AI backend used for platform keys—enterprise-grade data handling with regional processing</li>
+									</ul>
+
+									<p><strong>📝 Logging &amp; Telemetry Controls</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>Debug logging disabled by default:</strong> <code>LOG_LEVEL=WARNING</code> in production—DEBUG requires explicit opt-in to prevent accidental data exposure</li>
+										<li><strong>Access logs suppressed:</strong> Uvicorn access logs disabled by default to avoid logging URL paths and query parameters</li>
+										<li><strong>Filenames stripped from logs:</strong> <code>strip_metadata=True</code> by default—attachment filenames never appear in server logs</li>
+										<li><strong>SDK telemetry minimized:</strong> OpenAI SDK headers (<code>X-Stainless-*</code>) set to "private" to reduce fingerprinting</li>
+										<li><strong>Tightened error logging:</strong> Exception handling extracts only status codes and error types—never logs request content or prompts</li>
+									</ul>
+
+									<p><strong>🖼️ Image &amp; Attachment Privacy</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>EXIF metadata stripped:</strong> GPS coordinates, device identifiers, timestamps, and camera settings are removed from images before sending to AI providers</li>
+										<li><strong>In-memory processing only:</strong> Attachments stream through BytesIO—files never touch disk on our servers</li>
+										<li><strong>PDF text extraction:</strong> For providers that don't support native PDFs, text is extracted in-memory and the original file is discarded</li>
+									</ul>
+
+									<p><strong>👤 User Identity Protection</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>PII validation for user IDs:</strong> If raw PII (emails, phone numbers, SSNs, credit cards, names) is accidentally passed as a user identifier, it's detected and rejected—the request proceeds without user tracking</li>
+										<li><strong>Hashed identifiers only:</strong> User IDs sent to AI providers are opaque identifiers, never raw personal information</li>
+										<li><strong>Minimal account data:</strong> botchat stores only OAuth provider ID, email (if provided), signup date, message count, and subscription status—no names, no chat content</li>
+										<li><strong>Provider-based accounts:</strong> Accounts are keyed by OAuth provider ID (stable) rather than email addresses (which can change)</li>
+									</ul>
+
+									<p><strong>🔐 API Key Security (BYOK)</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>Client-side encryption:</strong> Your API keys are encrypted with AES-256 in your browser before storage</li>
+										<li><strong>Keys never sent to botchat:</strong> Encrypted keys are stored in browser localStorage, decrypted client-side, and sent directly to AI providers</li>
+										<li><strong>Server-side key storage (optional):</strong> If you use server-side key storage, keys are encrypted using PBKDF2-derived keys (480,000 iterations per OWASP guidelines) with Fernet (AES-128-CBC)</li>
+										<li><strong>Key prefix validation:</strong> API key formats are validated by prefix pattern—invalid keys are rejected before any API call</li>
+									</ul>
+
+									<p><strong>🌐 Network &amp; Request Security</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>No server-side chat storage:</strong> Conversations exist only in your browser's localStorage—not synced, not backed up to our servers</li>
+										<li><strong>Direct provider connections:</strong> Your messages go directly to AI providers through our relay—we don't store or inspect content</li>
+										<li><strong>Stateless authentication:</strong> JWTs are verified without server-side session storage—no user data persisted beyond the minimal account record</li>
+										<li><strong>Explicit timeouts:</strong> All AI provider requests have configurable timeouts to prevent hung connections from leaking context</li>
+									</ul>
+
+									<p><strong>🔒 Infrastructure Defaults</strong></p>
+									<ul class="list-disc list-inside ml-2 space-y-1">
+										<li><strong>Privacy-safe log levels:</strong> Log level is clamped to INFO minimum unless DEBUG is explicitly enabled—prevents verbose logging in production</li>
+										<li><strong>Email allowlists (dev):</strong> Development environments can restrict access by email to prevent unauthorized testing with real data</li>
+										<li><strong>Memory cleanup:</strong> Attachment data is explicitly dereferenced after processing to allow garbage collection</li>
+									</ul>
+
+									<p class="text-sm pt-2 text-gray-500 dark:text-gray-400">This list represents our current protections as of the latest release. We continuously evaluate and add new privacy measures. If you identify additional protections we should implement, please contact <a href="mailto:leo@botchat.ca" class="text-blue-600 dark:text-blue-400 hover:underline">leo@botchat.ca</a>.</p>
+								</div>
+							</details>
+
+							<details class="group border border-gray-200 dark:border-gray-700 rounded-lg">
+								<summary class="flex items-center justify-between cursor-pointer px-4 py-3 font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg">
 									<span>What's the difference between free and paid plans?</span>
 									<svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -213,13 +283,13 @@
 								<div class="px-4 pb-4 text-gray-600 dark:text-gray-300 space-y-3">
 									<p><strong>For user management and billing, botchat stores:</strong></p>
 									<ul class="list-disc list-inside ml-2 space-y-1">
-										<li><strong>OAuth identity:</strong> Your sign-in provider (GitHub/Google) and provider-issued ID</li>
+										<li><strong>OAuth identity:</strong> Your sign-in provider and provider-issued ID</li>
 										<li><strong>Email address:</strong> For account reference (when provided by your OAuth provider)</li>
 										<li><strong>Sign-up date:</strong> When you created your account</li>
 										<li><strong>Message count:</strong> How many messages you've sent using our keys during the current billing period</li>
 										<li><strong>Subscription details:</strong> Your plan status and subscription expiration (if applicable)</li>
 									</ul>
-									<p><strong>One provider = one account:</strong> Your account is tied to your sign-in method, not your email address. If you sign in with GitHub, that creates a GitHub account. If you sign in with Google, that's a separate Google account—even if the email is the same. This design uses stable provider IDs (which never change) rather than email addresses (which can change and cause issues).</p>
+									<p><strong>One provider = one account:</strong> Your account is tied to your sign-in method, not your email address. If you sign in with one provider, that creates an account tied to that provider. If you sign in with a different provider, that's a separate account—even if the email is the same. This design uses stable provider IDs (which never change) rather than email addresses (which can change and cause issues).</p>
 									<p><strong>Important:</strong> Always sign in with the same provider you used to subscribe. Your subscription is linked to that specific sign-in method.</p>
 									<p><strong>What this means:</strong> We store the minimum data required to authenticate you and manage billing/quotas. We don't even store your name. We do <em>not</em> store your chats, prompts, attachments, bot configurations, or any conversation content—that lives only in your browser.</p>
 								</div>
