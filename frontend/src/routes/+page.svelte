@@ -1933,7 +1933,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	<!-- Loading state while checking authentication -->
 	<div class="h-screen flex flex-col items-center justify-center bg-white dark:bg-gray-900">
 		<div class="text-center space-y-4">
-			<h1 class="text-4xl font-bold text-blue-600 dark:text-blue-400">botchat</h1>
+			<h1 class="text-4xl font-extrabold text-blue-600 dark:text-blue-400">botchat</h1>
 			<p class="text-gray-500 dark:text-gray-400">Loading...</p>
 		</div>
 	</div>
@@ -1944,7 +1944,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		<div class="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-800 dark:to-blue-900 text-white px-4 py-2 shadow">
 			<div class="flex items-center justify-between">
 				<div class="flex items-end gap-3">
-					<h1 class="text-4xl font-bold leading-none">botchat</h1>
+					<h1 class="text-4xl font-extrabold leading-none">botchat</h1>
 					<p class="text-blue-100 text-xs leading-tight">many minds<br/>no memory</p>
 				</div>
 				<div class="flex items-center gap-4">
@@ -2035,7 +2035,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	<div class="hidden md:block bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-800 dark:to-blue-900 text-white px-4 py-2 shadow">
 		<div class="flex items-center justify-between">
 			<div class="flex items-end gap-3">
-				<h1 class="text-4xl font-bold leading-none">botchat</h1>
+				<h1 class="text-4xl font-extrabold leading-none">botchat</h1>
 				<p class="text-blue-100 text-xs leading-tight">many minds<br/>no memory</p>
 			</div>
 			<div class="flex items-center gap-4">
@@ -2111,7 +2111,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				</div>
 
 				<!-- Global Attachment -->
-				<div class="border-b dark:border-gray-700 pb-4">
+				<div class="pb-4">
 					<button
 						on:click={() => (attachmentsOpen = !attachmentsOpen)}
 						class="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition"

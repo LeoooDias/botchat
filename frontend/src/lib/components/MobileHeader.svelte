@@ -74,7 +74,7 @@
 			class="flex items-center"
 			aria-label="About botchat"
 		>
-			<h1 class="text-lg font-bold">botchat</h1>
+			<h1 class="text-lg font-extrabold">botchat</h1>
 		</button>
 
 		<!-- Center: Chat name (truncated) - clickable for chat menu -->

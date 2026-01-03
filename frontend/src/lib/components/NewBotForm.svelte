@@ -145,7 +145,7 @@
 	}
 </script>
 
-<div class="border-b dark:border-gray-700 pb-4">
+<div>
 	<div class="space-y-3">
 		<!-- Provider -->
 		<div>
