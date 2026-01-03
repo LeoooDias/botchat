@@ -1295,7 +1295,7 @@ async def delete_provider_key(provider: str, api_key=Depends(require_api_key)):
 # -----------------------------
 
 # Privacy & Security: Request size limits
-MAX_MESSAGE_LENGTH = 100_000  # ~100KB text limit
+MAX_MESSAGE_LENGTH = 10_000_000  # ~10MB - aligned with largest LLM context windows (Gemini 2M tokens)
 
 
 @app.post("/runs", response_model=RunCreateResponse)

@@ -1316,7 +1316,16 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 					currentRunAbortController = null;
 					return;
 				}
-				throw new Error('Failed to create run');
+				// Parse error detail from backend
+				let errorDetail = 'Failed to create run';
+				try {
+					const errorJson = await response.json();
+					errorDetail = errorJson.detail || errorDetail;
+				} catch {
+					// If not JSON, use status text
+					errorDetail = response.statusText || errorDetail;
+				}
+				throw new Error(errorDetail);
 			}
 			const { run_id } = await response.json();
 
@@ -1812,9 +1821,15 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			});
 
 			if (!response.ok) {
-				const errorText = await response.text();
-				console.error('Failed to create run:', response.status, errorText);
-				throw new Error(`Failed to create summarization run: ${response.status} ${errorText}`);
+				let errorDetail = 'Unknown error';
+				try {
+					const errorJson = await response.json();
+					errorDetail = errorJson.detail || 'Unknown error';
+				} catch {
+					errorDetail = await response.text();
+				}
+				console.error('Failed to create run:', response.status, errorDetail);
+				throw new Error(errorDetail);
 			}
 			
 			const responseData = await response.json();
