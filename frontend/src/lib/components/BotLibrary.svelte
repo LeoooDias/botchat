@@ -714,50 +714,55 @@
 
 											<!-- Edit Dialog for this bot -->
 											{#if editingBotId === bot.id}
-												<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-													<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-md mx-4">
-														<h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Edit Bot</h2>
+												<div use:portal class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[200] p-4">
+													<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+														<!-- Header -->
+														<div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+															<h2 class="text-lg font-bold text-gray-900 dark:text-white">Edit Bot</h2>
+														</div>
 
-														<!-- Model validation warning -->
-														{#if !isBotModelValid(bot)}
-															<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg">
-																<div class="flex items-center gap-2 text-red-700 dark:text-red-300">
-																	<svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-																		<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-																	</svg>
-																	<span class="font-medium text-sm">Model no longer available</span>
+														<!-- Scrollable Content -->
+														<div class="flex-1 overflow-y-auto px-6 py-4 min-h-0">
+															<!-- Model validation warning -->
+															{#if !isBotModelValid(bot)}
+																<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg">
+																	<div class="flex items-center gap-2 text-red-700 dark:text-red-300">
+																		<svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+																			<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+																		</svg>
+																		<span class="font-medium text-sm">Model no longer available</span>
+																	</div>
+																	<p class="mt-1 text-sm text-red-600 dark:text-red-400">
+																		Select a new model below to continue using this bot.
+																	</p>
 																</div>
-																<p class="mt-1 text-sm text-red-600 dark:text-red-400">
-																	Select a new model below to continue using this bot.
-																</p>
-															</div>
-														{/if}
+															{/if}
 
-														<div class="space-y-4">
-															<!-- Bot Name -->
-															<div>
-																<label for="edit-name-{bot.id}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-																	Name
-																</label>
-																<input
-																	id="edit-name-{bot.id}"
-																	type="text"
-																	value={bot.name}
-																	on:change={(e) => (bot.name = e.currentTarget.value)}
-																	on:keydown={(e) => e.key === 'Enter' && saveEdit(bot)}
-																	placeholder="e.g., Code Reviewer"
-																	class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-																/>
-															</div>
+															<div class="space-y-4">
+																<!-- Bot Name -->
+																<div>
+																	<label for="edit-name-{bot.id}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+																		Name
+																	</label>
+																	<input
+																		id="edit-name-{bot.id}"
+																		type="text"
+																		value={bot.name}
+																		on:change={(e) => (bot.name = e.currentTarget.value)}
+																		on:keydown={(e) => e.key === 'Enter' && saveEdit(bot)}
+																		placeholder="e.g., Code Reviewer"
+																		class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+																	/>
+																</div>
 
-															<!-- Category -->
-															<div>
-																<label for="edit-category-{bot.id}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-																	Category
-																</label>
-																<select
-																	id="edit-category-{bot.id}"
-																	value={bot.category || ''}
+																<!-- Category -->
+																<div>
+																	<label for="edit-category-{bot.id}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+																		Category
+																	</label>
+																	<select
+																		id="edit-category-{bot.id}"
+																		value={bot.category || ''}
 																	on:change={(e) => (bot.category = e.currentTarget.value || undefined)}
 																	class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
 																>
@@ -879,22 +884,25 @@
 																{/if}
 															</div>
 														</div>
+														</div>
 
-														<!-- Buttons -->
-														<div class="flex gap-2 mt-6">
-															<button
-																on:click={cancelEdit}
-																class="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium text-sm"
-															>
-																Cancel
-															</button>
-															<button
-																on:click={() => saveEdit(bot)}
-																disabled={!!getMaxTokensError(bot)}
-																class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition font-medium text-sm"
-															>
-																Save Changes
-															</button>
+														<!-- Footer with Buttons -->
+														<div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+															<div class="flex gap-2">
+																<button
+																	on:click={cancelEdit}
+																	class="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium text-sm"
+																>
+																	Cancel
+																</button>
+																<button
+																	on:click={() => saveEdit(bot)}
+																	disabled={!!getMaxTokensError(bot)}
+																	class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition font-medium text-sm"
+																>
+																	Save Changes
+																</button>
+															</div>
 														</div>
 													</div>
 												</div>

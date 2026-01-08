@@ -3,7 +3,6 @@
 	import { fly, fade } from 'svelte/transition';
 
 	export let activePanel: 'none' | 'library' | 'chats' | 'newbot' | 'attachments' = 'none';
-	export let hasConfiguredProviders = false;
 	export let attachmentCount = 0;
 	export let chatCount = 0;
 
@@ -154,11 +153,6 @@
 					<span class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-blue-500 text-white text-[10px] font-bold rounded-full px-1">
 						{chatCount > 9 ? '9+' : chatCount}
 					</span>
-				{/if}
-
-				<!-- Indicator for new bot if no providers -->
-				{#if item.id === 'newbot' && !hasConfiguredProviders}
-					<span class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full"></span>
 				{/if}
 			</button>
 		{/each}

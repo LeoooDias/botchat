@@ -545,27 +545,27 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		}
 	}
 
-	// Save messages to sessionStorage (survives page navigation but not tab close)
+	// Save messages to localStorage (persists across page refreshes and tab closes)
 	function saveMessages() {
-		if (browser && currentConversationId) {
+		if (browser && $isAuthenticated && currentConversationId) {
 			// Save current conversation messages to the in-memory store
 			conversationMessages[currentConversationId] = messages;
-			// Persist all conversation messages to sessionStorage
+			// Persist all conversation messages to localStorage
 			try {
 				const messagesData = JSON.stringify(conversationMessages);
-				sessionStorage.setItem('conversationMessages', messagesData);
+				setUserItem('conversationMessages', messagesData);
 			} catch (e) {
-				// sessionStorage might be full or unavailable
-				console.warn('Failed to save messages to sessionStorage:', e);
+				// localStorage might be full or unavailable
+				console.warn('Failed to save messages to localStorage:', e);
 			}
 		}
 	}
 
-	// Load messages from sessionStorage
+	// Load messages from localStorage
 	function loadMessages() {
-		if (browser) {
+		if (browser && $isAuthenticated) {
 			try {
-				const saved = sessionStorage.getItem('conversationMessages');
+				const saved = getUserItem('conversationMessages');
 				if (saved) {
 					conversationMessages = JSON.parse(saved);
 					// Load messages for current conversation
@@ -574,19 +574,19 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 					}
 				}
 			} catch (e) {
-				console.warn('Failed to load messages from sessionStorage:', e);
+				console.warn('Failed to load messages from localStorage:', e);
 			}
 		}
 	}
 
-	// Clear messages for a specific conversation from sessionStorage
+	// Clear messages for a specific conversation from localStorage
 	function clearConversationMessages(conversationId: string) {
 		delete conversationMessages[conversationId];
-		if (browser) {
+		if (browser && $isAuthenticated) {
 			try {
-				sessionStorage.setItem('conversationMessages', JSON.stringify(conversationMessages));
+				setUserItem('conversationMessages', JSON.stringify(conversationMessages));
 			} catch (e) {
-				console.warn('Failed to update sessionStorage:', e);
+				console.warn('Failed to update localStorage:', e);
 			}
 		}
 	}
@@ -2410,7 +2410,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			
 			<!-- Message Input (with bottom padding for mobile nav bar) -->
 			<div class="pb-mobile-nav md:pb-0">
-				<MessageInput on:send={(e: CustomEvent<string>) => sendMessage(e.detail)} {isLoading} botsCount={activeBots.length} onCancel={cancelMessage} {messages} {activeBots} {globalAttachments} hasOversizedAttachments={hasOversizedAttachments} {hasInvalidActiveBots} bind:currentMessage={currentInputMessage} />
+				<MessageInput on:send={(e: CustomEvent<string>) => sendMessage(e.detail)} {isLoading} botsCount={activeBots.length} onCancel={cancelMessage} hasOversizedAttachments={hasOversizedAttachments} {hasInvalidActiveBots} bind:currentMessage={currentInputMessage} />
 			</div>
 			
 			<!-- Desktop Active Bots Bar -->
@@ -2743,7 +2743,6 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 {#if $isAuthenticated}
 <MobileNav
 	activePanel={mobilePanel}
-	{hasConfiguredProviders}
 	attachmentCount={globalAttachments.length}
 	chatCount={conversations.length}
 	on:openPanel={(e) => openMobilePanel(e.detail)}

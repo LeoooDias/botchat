@@ -18,6 +18,7 @@ const USER_KEYS = [
     'savedBots',
     'conversations',
     'currentConversationId',
+    'conversationMessages',
     'botCategories',
     'collapsedCategories',
     'botLibraryInfoDismissed',

@@ -4,9 +4,6 @@
 	export let isLoading = false;
 	export let botsCount = 0;
 	export let onCancel: (() => void) | null = null;
-	export let messages: Array<{ content: string; role: string }> = [];
-	export let activeBots: Array<{ name?: string; systemInstructionText?: string }> = [];
-	export let globalAttachments: File[] = [];
 	export let currentMessage = ''; // Bound to parent for token estimation
 	export let hasOversizedAttachments = false; // Block sending if true
 	export let hasInvalidActiveBots = false; // Block sending if any bot has invalid model
@@ -14,39 +11,6 @@
 	const dispatch = createEventDispatcher<{ send: string }>();
 
 	let inputElement: HTMLTextAreaElement;
-	let estimatedTokens = 0;
-
-	function estimateTokens(inputText: string): number {
-		// Rough token estimation: ~4 characters per token (industry standard)
-		// This estimates INPUT tokens only - the context window being sent to the LLM
-		
-		let totalText = '';
-
-		// Add average system instruction length (varies slightly per bot)
-		let avgSystemInstructionLength = 0;
-		if (activeBots.length > 0) {
-			const totalSysLength = activeBots.reduce((sum, bot) => sum + (bot.systemInstructionText?.length || 0), 0);
-			avgSystemInstructionLength = totalSysLength / activeBots.length;
-		}
-
-		// Add conversation history
-		for (const msg of messages) {
-			totalText += msg.content + ' ';
-		}
-
-		// Add attachment tokens (estimate ~1 token per 4000 bytes, plus base tokens per file)
-		let attachmentTokens = 0;
-		for (const file of globalAttachments) {
-			const fileTokens = Math.ceil(file.size / 4000) + 50; // 50 base tokens per file
-			attachmentTokens += fileTokens;
-		}
-
-		// Add the current message
-		totalText += inputText;
-
-		// Input tokens only = system instruction + conversation history + message + attachments
-		return Math.ceil(avgSystemInstructionLength / 4) + Math.ceil(totalText.length / 4) + attachmentTokens;
-	}
 
 	// Can send if: has message, has valid bots, no oversized attachments, no invalid bots
 	$: canSend = currentMessage.trim() && botsCount > 0 && !hasOversizedAttachments && !hasInvalidActiveBots;
@@ -57,7 +21,6 @@
 		} else if (canSend) {
 			dispatch('send', currentMessage);
 			currentMessage = '';
-			estimatedTokens = 0;
 			// Reset textarea height after sending
 			if (inputElement) {
 				inputElement.style.height = 'auto';
@@ -84,13 +47,6 @@
 			const minHeight = (isMobile && scrollHeight > 32) ? 48 : 0;
 			inputElement.style.height = Math.max(minHeight, Math.min(scrollHeight, maxHeight)) + 'px';
 		}
-		// Update token estimate as user types
-		estimatedTokens = estimateTokens(currentMessage);
-	}
-
-	// Reactive statement to update token estimate when message, bots, or attachments change
-	$: if (currentMessage || activeBots.length > 0 || globalAttachments.length > 0) {
-		estimatedTokens = estimateTokens(currentMessage);
 	}
 
 	// Set initial height on mount for mobile
@@ -114,14 +70,6 @@
 				rows="1"
 				class="flex-1 px-3 md:px-4 py-2.5 md:py-2 border-0 resize-none focus:outline-none focus:ring-0 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-base md:text-sm bg-transparent dark:text-white dark:placeholder-gray-400"
 			></textarea>
-			<!-- Token count (hidden on mobile to save space) -->
-			{#if currentMessage.trim() && estimatedTokens > 0}
-				<div class="hidden md:flex items-center pr-3 h-full">
-					<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-						~{estimatedTokens.toLocaleString()} tokens
-					</span>
-				</div>
-			{/if}
 		</div>
 		<!-- Send/Cancel button - outside input container for better mobile UX -->
 		<button
