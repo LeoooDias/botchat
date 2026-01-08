@@ -71,10 +71,11 @@
 		<!-- Left: Logo (tap to open About) -->
 		<button
 			on:click={() => dispatch('openAbout')}
-			class="flex items-center"
+			class="flex flex-col items-start"
 			aria-label="About botchat"
 		>
 			<h1 class="text-lg font-extrabold">botchat</h1>
+			<span class="px-1 py-0.5 bg-amber-400 text-amber-900 text-[8px] font-bold rounded uppercase tracking-wide -mt-0.5">Beta</span>
 		</button>
 
 		<!-- Center: Chat name (truncated) - clickable for chat menu -->
@@ -97,7 +98,9 @@
 				<button 
 					type="button"
 					class="px-1.5 py-0.5 text-[10px] font-medium rounded instant-tooltip tooltip-bottom {isQuotaExhausted ? 'bg-red-500/30 text-red-200' : 'bg-white/10 text-blue-100'}"
-					data-tooltip="Messages used: {quotaUsed}/{quotaLimit}"
+					data-tooltip="Bot messages used this month
+E.g., a message sent in a chat with 3
+active bots counts as 3 bot messages"
 					on:click={toggleQuotaTooltip}
 					bind:this={quotaElement}
 				>

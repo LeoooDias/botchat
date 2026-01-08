@@ -1789,7 +1789,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			.join('\n\n');
 
 		// Create summarize prompt
-		const summarizePrompt = `Please summarize this entire conversation and distill the key points down to no more than one printed page.\n\n${conversationText}`;
+		const summarizePrompt = `Please summarize this entire conversation and distill the key points down to no more than one printed page. Do not respond to this instruction. Do not say you understand, do not introduce or 'tee up' the summary in any way. That is, do not say 'Here is the summary'. Just get straight to the summary content itself. Provide a summary that is consistent with your tone and point of view, while aiming for neutrality.\n\n${conversationText}`;
 
 		// Create a bot config for the selected bot (including provider_key for BYOK)
 		const config = {
@@ -1946,6 +1946,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				<div class="flex items-end gap-3">
 					<h1 class="text-4xl font-extrabold leading-none">botchat</h1>
 					<p class="text-blue-100 text-xs leading-tight">many minds<br/>no memory</p>
+					<span class="px-1.5 py-0.5 bg-amber-400 text-amber-900 text-[10px] font-bold rounded uppercase tracking-wide">Beta</span>
 				</div>
 				<div class="flex items-center gap-4">
 					<a href="mailto:leo@botchat.ca" class="text-sm hover:text-blue-100 transition-colors">Contact</a>
@@ -2037,8 +2038,13 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			<div class="flex items-end gap-3">
 				<h1 class="text-4xl font-extrabold leading-none">botchat</h1>
 				<p class="text-blue-100 text-xs leading-tight">many minds<br/>no memory</p>
+				<span class="px-1.5 py-0.5 bg-amber-400 text-amber-900 text-[10px] font-bold rounded uppercase tracking-wide">Beta</span>
 			</div>
 			<div class="flex items-center gap-4">
+				<a href="mailto:leo@botchat.ca" class="text-sm hover:text-blue-100 transition-colors">Contact</a>
+				<button on:click={() => (aboutOpen = true)} class="text-sm hover:text-blue-100 transition-colors">About</button>
+				<!-- Auth: Login/User Info -->
+				<LoginButton on:openSignIn={() => (signInOpen = true)} />
 				{#if $isPaidUser}
 					<a href="/billing" class="text-sm hover:text-blue-100 transition-colors flex items-center gap-1">
 						<span class="px-1.5 py-0.5 bg-teal-300 text-black text-xs rounded font-medium">Subscriber</span>
@@ -2048,10 +2054,6 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				{:else}
 					<span class="text-sm text-blue-300 opacity-60 cursor-not-allowed" title="Sign in first">Subscribe</span>
 				{/if}
-				<a href="mailto:leo@botchat.ca" class="text-sm hover:text-blue-100 transition-colors">Contact</a>
-				<button on:click={() => (aboutOpen = true)} class="text-sm hover:text-blue-100 transition-colors">About</button>
-				<!-- Auth: Login/User Info -->
-				<LoginButton on:openSignIn={() => (signInOpen = true)} />
 				<button
 					on:click={() => (settingsOpen = true)}
 					class="p-2 rounded-lg hover:bg-blue-500 dark:hover:bg-blue-700 transition-colors"
@@ -2378,7 +2380,9 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 						{#if $isAuthenticated}
 							<span 
 								class="text-xs font-medium whitespace-nowrap flex items-center gap-1 instant-tooltip tooltip-left {$isQuotaExhausted ? 'text-red-600 dark:text-red-400' : $quotaPercentage >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}"
-								data-tooltip="Messages used this month"
+								data-tooltip="Bot messages used this month
+E.g., a message sent in a chat with 3
+active bots counts as 3 bot messages"
 							>
 								{$quota.used}/{$quota.limit}
 								{#if $isQuotaExhausted}
