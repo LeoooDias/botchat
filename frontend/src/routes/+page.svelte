@@ -1736,14 +1736,37 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 	}
 
 	function exportConfig() {
-		// Gather all configuration data
+		// Derive categories from actual bot usage to avoid stale localStorage issues
+		// Get unique category names from bots, excluding undefined/empty
+		const usedCategoryNames = [...new Set(bots.map(b => b.category).filter((c): c is string => !!c))];
+		
+		// Try to preserve category IDs from storage if they exist, otherwise generate new ones
 		const storedCategories = getUserItem('botCategories');
+		const storedCategoryMap = new Map<string, string>();
+		if (storedCategories) {
+			try {
+				const parsed = JSON.parse(storedCategories);
+				parsed.forEach((c: { id: string; name: string }) => storedCategoryMap.set(c.name, c.id));
+			} catch (e) {
+				// Ignore parse errors
+			}
+		}
+		
+		// Build fresh categories array from actual usage
+		const freshCategories = usedCategoryNames.map(name => ({
+			id: storedCategoryMap.get(name) || crypto.randomUUID(),
+			name
+		}));
+		
+		// Update localStorage to match reality
+		setUserItem('botCategories', JSON.stringify(freshCategories));
+		
 		const config = {
 			version: '1.0',
 			exportedAt: new Date().toISOString(),
 			bots: bots,
 			conversations: conversations,
-			categories: storedCategories ? JSON.parse(storedCategories) : [],
+			categories: freshCategories,
 			settings: {
 				// Add any app-level settings here if needed
 				theme: getGlobalItem('theme') || 'auto'
