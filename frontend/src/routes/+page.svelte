@@ -54,6 +54,7 @@
 		content: string;
 		timestamp: number;
 		botId?: string;
+		botName?: string; // Custom bot name for group chat context
 		provider?: string;
 		model?: string;
 		isError?: boolean;
@@ -1137,7 +1138,10 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			if (msg.role === 'user') {
 				history += `**You:** ${msg.content}\n\n`;
 			} else {
-				const botLabel = msg.model ? `**${msg.provider} (${msg.model})**` : '**Assistant**';
+				// Use bot's custom name if available, with provider/model as fallback
+				const botLabel = msg.botName 
+					? `**${msg.botName}**`
+					: msg.model ? `**${msg.provider} (${msg.model})**` : '**Assistant**';
 				history += `${botLabel}: ${msg.content}\n\n`;
 			}
 		}
@@ -1483,6 +1487,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										content: data.token,
 										timestamp: Date.now(),
 										botId: data.config_id,
+										botName: bot?.name,
 										provider: bot?.provider,
 										model: bot?.model
 									};
@@ -1530,6 +1535,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										content: data.final,
 										timestamp: Date.now(),
 										botId: data.config_id,
+										botName: bot?.name,
 										provider: bot?.provider,
 										model: bot?.model,
 										isTruncated,
@@ -1558,7 +1564,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 								const targetMsgs = getTargetMessages();
 								const targetBots = getTargetActiveBots();
 								const bot = targetBots.find((b) => b.id === data.config_id);
-								const botLabel = bot ? `${bot.provider} (${bot.model})` : 'Unknown bot';
+								const botLabel = bot?.name || (bot ? `${bot.provider} (${bot.model})` : 'Unknown bot');
 								
 								// Remove any partial/blank streaming message for this bot
 								if (messageId) {
@@ -1581,6 +1587,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 									content: errorMessage,
 									timestamp: Date.now(),
 									botId: data.config_id,
+									botName: bot?.name,
 									provider: bot?.provider,
 									model: bot?.model,
 									isError: true,
@@ -1656,9 +1663,8 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			if (msg.role === 'user') {
 				markdown += `### 👤 User\n\n${msg.content}\n\n`;
 			} else {
-				// Look up bot name from activeBots using botId
-				const bot = activeBots.find((b) => b.id === msg.botId);
-				const botName = bot?.name || 'Assistant';
+				// Use stored botName, or fall back to looking up from activeBots
+				const botName = msg.botName || activeBots.find((b) => b.id === msg.botId)?.name || 'Assistant';
 				const botLabel = msg.model ? `${botName} (${msg.provider} / ${msg.model})` : botName;
 				const heading = `### 🤖 ${botLabel}`;
 
@@ -1906,14 +1912,13 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				if (msg.role === 'user') {
 					return `**You:** ${msg.content}`;
 				} else {
-					// Look up bot name from activeBots using botId
-					const bot = activeBots.find((b) => b.id === msg.botId);
-					const botName = bot?.name || 'Assistant';
+					// Use stored botName, or fall back to looking up from activeBots
+					const botName = msg.botName || activeBots.find((b) => b.id === msg.botId)?.name || 'Assistant';
 					const botLabel = msg.model ? `**${botName} (${msg.provider} / ${msg.model})**` : `**${botName}**`;
 					return `${botLabel}: ${msg.content}`;
 				}
 			})
-			.join('\n\n');
+			.join('\n\\n');
 
 		// Create summarize prompt
 		const summarizePrompt = `Please summarize this entire conversation and distill the key points down to no more than one printed page. Do not respond to this instruction. Do not say you understand, do not introduce or 'tee up' the summary in any way. That is, do not say 'Here is the summary'. Just get straight to the summary content itself. Provide a summary that is consistent with your tone and point of view, while aiming for neutrality.\n\n${conversationText}`;
