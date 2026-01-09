@@ -16,6 +16,7 @@
 	export let canCreateChat = true;
 	export let maxChats = 3;
 	export let isStreaming = false;
+	export let unreadChats: Set<string> = new Set(); // Chats with unread messages
 
 	const dispatch = createEventDispatcher<{
 		select: string;
@@ -225,9 +226,14 @@
 								>
 									<div class="flex items-start justify-between gap-2">
 										<div class="flex-1 min-w-0">
-											<h3 class="font-medium text-gray-900 dark:text-white truncate">
-												{chat.name}
-											</h3>
+											<div class="flex items-center gap-2">
+												{#if unreadChats.has(chat.id)}
+													<span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse flex-shrink-0" title="New messages"></span>
+												{/if}
+												<h3 class="font-medium text-gray-900 dark:text-white truncate">
+													{chat.name}
+												</h3>
+											</div>
 											{#if chat.description}
 												<p class="text-sm text-gray-500 dark:text-gray-400 truncate mt-0.5">
 													{chat.description}

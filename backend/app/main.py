@@ -322,6 +322,7 @@ class ModelConfig(BaseModel):
     system: str = ""
     max_tokens: Optional[int] = None  # Optional per-persona token limit
     provider_key: Optional[str] = None  # Client-provided API key (decrypted from localStorage)
+    web_search_enabled: bool = False  # Enable web search tool (model decides when to search)
 
 
 class RunCreateRequest(BaseModel):
@@ -640,19 +641,28 @@ async def _stream_gemini_native(
                            retry_count + 1, max_retries + 1)
                 
                 final_parts.clear()
-                for chunk in stream_gemini(
+                result = None
+                gen = stream_gemini(
                     message=effective_message,
                     model=cfg.model,
                     api_key=api_key,
                     system_instruction=cfg.system if cfg.system else None,
                     max_tokens=max_tokens_to_use,
                     file_data=file_data,
-                ):
-                    final_parts.append(chunk)
-                    loop.call_soon_threadsafe(
-                        run.queue.put_nowait,
-                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
-                    )
+                    web_search_enabled=cfg.web_search_enabled,
+                )
+                
+                # Iterate through generator, capturing return value
+                try:
+                    while True:
+                        chunk = next(gen)
+                        final_parts.append(chunk)
+                        loop.call_soon_threadsafe(
+                            run.queue.put_nowait,
+                            sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                        )
+                except StopIteration as e:
+                    result = e.value  # Capture generator return value (citations dict)
                 
                 final = "".join(final_parts).strip()
                 run.finals[cfg.id] = final
@@ -664,6 +674,16 @@ async def _stream_gemini_native(
                     run.queue.put_nowait,
                     sse("panel_final", {"config_id": cfg.id, "final": final}),
                 )
+                
+                # Emit citations if web search was used
+                if result and result.get('citations'):
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_citations", {"config_id": cfg.id, "citations": result['citations']}),
+                    )
+                    logger.debug("Emitted %d citations for Gemini panel %s", 
+                               len(result['citations']), cfg.id)
+                
                 return  # Success
                 
             except GeminiRateLimitError as e:
@@ -767,19 +787,28 @@ async def _stream_openai_native(
                            retry_count + 1, max_retries + 1)
                 
                 final_parts.clear()
-                for chunk in stream_openai(
+                result = None
+                gen = stream_openai(
                     message=effective_message,
                     model=cfg.model,
                     api_key=api_key,
                     system_instruction=cfg.system if cfg.system else None,
                     max_tokens=max_tokens_to_use,
                     file_data=file_data,
-                ):
-                    final_parts.append(chunk)
-                    loop.call_soon_threadsafe(
-                        run.queue.put_nowait,
-                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
-                    )
+                    web_search_enabled=cfg.web_search_enabled,
+                )
+                
+                # Iterate through generator, capturing return value
+                try:
+                    while True:
+                        chunk = next(gen)
+                        final_parts.append(chunk)
+                        loop.call_soon_threadsafe(
+                            run.queue.put_nowait,
+                            sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                        )
+                except StopIteration as e:
+                    result = e.value  # Capture generator return value (citations dict)
                 
                 final = "".join(final_parts).strip()
                 run.finals[cfg.id] = final
@@ -791,6 +820,16 @@ async def _stream_openai_native(
                     run.queue.put_nowait,
                     sse("panel_final", {"config_id": cfg.id, "final": final}),
                 )
+                
+                # Emit citations if web search was used
+                if result and result.get('citations'):
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_citations", {"config_id": cfg.id, "citations": result['citations']}),
+                    )
+                    logger.debug("Emitted %d citations for OpenAI panel %s", 
+                               len(result['citations']), cfg.id)
+                
                 return  # Success
                 
             except OpenAIRateLimitError as e:
@@ -894,19 +933,28 @@ async def _stream_anthropic_native(
                            retry_count + 1, max_retries + 1)
                 
                 final_parts.clear()
-                for chunk in stream_anthropic(
+                result = None
+                gen = stream_anthropic(
                     message=effective_message,
                     model=cfg.model,
                     api_key=api_key,
                     system_instruction=cfg.system if cfg.system else None,
                     max_tokens=max_tokens_to_use,
                     file_data=file_data,
-                ):
-                    final_parts.append(chunk)
-                    loop.call_soon_threadsafe(
-                        run.queue.put_nowait,
-                        sse("panel_token", {"config_id": cfg.id, "token": chunk}),
-                    )
+                    web_search_enabled=cfg.web_search_enabled,
+                )
+                
+                # Iterate through generator, capturing return value
+                try:
+                    while True:
+                        chunk = next(gen)
+                        final_parts.append(chunk)
+                        loop.call_soon_threadsafe(
+                            run.queue.put_nowait,
+                            sse("panel_token", {"config_id": cfg.id, "token": chunk}),
+                        )
+                except StopIteration as e:
+                    result = e.value  # Capture generator return value (citations dict)
                 
                 final = "".join(final_parts).strip()
                 run.finals[cfg.id] = final
@@ -918,6 +966,16 @@ async def _stream_anthropic_native(
                     run.queue.put_nowait,
                     sse("panel_final", {"config_id": cfg.id, "final": final}),
                 )
+                
+                # Emit citations if web search was used
+                if result and result.get('citations'):
+                    loop.call_soon_threadsafe(
+                        run.queue.put_nowait,
+                        sse("panel_citations", {"config_id": cfg.id, "citations": result['citations']}),
+                    )
+                    logger.debug("Emitted %d citations for Anthropic panel %s", 
+                               len(result['citations']), cfg.id)
+                
                 return  # Success
                 
             except AnthropicRateLimitError as e:

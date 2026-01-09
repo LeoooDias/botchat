@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
+	import CitationsPopup from './CitationsPopup.svelte';
+	import type { Citation } from './CitationsPopup.svelte';
 
 	interface Message {
 		id: string;
@@ -13,6 +15,7 @@
 		isError?: boolean;
 		isTruncated?: boolean; // Response was cut off due to max_tokens limit
 		finishReason?: string; // Raw finish_reason from provider
+		citations?: Citation[]; // Web search citations
 		lastInputs?: {
 			message: string;
 			attachments: File[];
@@ -24,18 +27,42 @@
 		provider: string;
 		model: string;
 		name?: string;
+		webSearchEnabled?: boolean;
 	}
 
 	export let messages: Message[] = [];
 	export let activeBots: Bot[] = [];
+	export let pendingBots: Set<string> = new Set(); // Bots waiting for first token (show loading spinner)
 	export let onRetry: ((msg: Message) => void) | null = null;
 
 	let messagesContainer: HTMLDivElement;
+	let showCitationsPopup = false;
+	let selectedCitations: Citation[] = [];
 
-	// Configure marked for better rendering
+	// Configure marked for better rendering with custom link renderer
+	// Custom renderer to make all links open in a new tab
+	const renderer = new marked.Renderer();
+	const originalLinkRenderer = renderer.link;
+	renderer.link = function(href: string, title: string | null, text: string) {
+		const html = originalLinkRenderer.call(this, href, title, text);
+		// Add target="_blank" and rel="noopener noreferrer" for security
+		return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+	};
+
 	marked.setOptions({
 		breaks: true,
-		gfm: true
+		gfm: true,
+		renderer: renderer
+	});
+
+	// Configure DOMPurify to allow target attribute on links (for opening in new tabs)
+	// By default DOMPurify strips target="_blank" for security, but we explicitly add it
+	DOMPurify.addHook('afterSanitizeAttributes', function(node) {
+		// Set all links to open in new tab
+		if (node.tagName === 'A') {
+			node.setAttribute('target', '_blank');
+			node.setAttribute('rel', 'noopener noreferrer');
+		}
 	});
 
 	function scrollToBottom() {
@@ -70,6 +97,16 @@
 		if (!botId) return 'Assistant';
 		const bot = activeBots.find((b) => b.id === botId);
 		return bot ? `${bot.provider} • ${bot.model}` : 'Unknown';
+	}
+
+	function openCitations(citations: Citation[]) {
+		selectedCitations = citations;
+		showCitationsPopup = true;
+	}
+
+	function closeCitations() {
+		showCitationsPopup = false;
+		selectedCitations = [];
 	}
 
 	/**
@@ -143,6 +180,22 @@
 								</div>
 							</div>
 						{/if}
+						{#if msg.citations && msg.citations.length > 0}
+							<div class="mt-2 pt-2 border-t border-blue-200 dark:border-blue-800">
+								<button
+									on:click={() => openCitations(msg.citations || [])}
+									class="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition font-medium"
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+									</svg>
+									<span>View {msg.citations.length} web source{msg.citations.length === 1 ? '' : 's'}</span>
+									<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+									</svg>
+								</button>
+							</div>
+						{/if}
 					{:else}
 						<p class="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
 					{/if}
@@ -162,7 +215,43 @@
 			</div>
 		</div>
 	{/each}
+	
+	<!-- Loading spinners for pending bots (waiting for first token) -->
+	{#each activeBots.filter(b => pendingBots.has(b.id)) as bot (bot.id)}
+		<div class="flex justify-start">
+			<div class="max-w-[80%] p-3 rounded-2xl bg-gray-100 dark:bg-gray-700 rounded-bl-md">
+				<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
+					<span class="font-medium">{bot.name || bot.model}</span>
+					<span>•</span>
+					<span class="capitalize">{bot.provider}</span>
+					{#if bot.webSearchEnabled}
+						<span title="Web search enabled">
+							<svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.919 17.919 0 01-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+							</svg>
+						</span>
+					{/if}
+				</div>
+				<div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+					<!-- Animated loading dots -->
+					<div class="flex items-center gap-1">
+						<span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
+						<span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
+						<span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
+					</div>
+					<span class="text-sm">{bot.webSearchEnabled ? 'Searching & thinking...' : 'Thinking...'}</span>
+				</div>
+			</div>
+		</div>
+	{/each}
 </div>
+
+<!-- Citations Popup -->
+<CitationsPopup 
+	citations={selectedCitations} 
+	isOpen={showCitationsPopup} 
+	on:close={closeCitations}
+/>
 
 <style>
 	/* Ensure tooltip text breaks properly */

@@ -42,6 +42,12 @@
 		alertOpen = true;
 	}
 
+	interface Citation {
+		index: number;
+		url: string;
+		title: string;
+	}
+
 	interface Message {
 		id: string;
 		role: 'user' | 'assistant';
@@ -53,6 +59,7 @@
 		isError?: boolean;
 		isTruncated?: boolean; // Response was cut off due to max_tokens limit
 		finishReason?: string; // Raw finish_reason from provider
+		citations?: Citation[]; // Web search citations
 		lastInputs?: {
 			message: string;
 			attachments: File[];
@@ -68,6 +75,7 @@
 		name?: string;
 		maxTokens?: number;
 		category?: string;
+		webSearchEnabled?: boolean;
 	}
 
 	let messages: Message[] = [];
@@ -107,6 +115,9 @@
 	let sidebarOpen = true; // Sidebar visibility state
 	let currentStreamingMessageIds = new Map<string, string>(); // Maps config_id to message.id for active streams
 	let streamingCount = 0; // Reactive counter for active streams (since Map.size isn't reactive)
+	let streamingConversationId: string | null = null; // Conversation ID where current streaming run belongs
+	let unreadConversations = new Set<string>(); // Conversations with unread messages (user switched away during streaming)
+	let pendingBots = new Set<string>(); // Bot IDs waiting for first token (for loading spinner)
 	let settingsOpen = false; // Settings modal state
 	let signInOpen = false; // Sign-in modal state
 	let aboutOpen = false; // About modal state
@@ -482,6 +493,9 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		currentConversationId = conversationId;
 		// Load messages for the new conversation
 		messages = conversationMessages[conversationId] || [];
+		// Clear unread indicator for this conversation
+		unreadConversations.delete(conversationId);
+		unreadConversations = unreadConversations; // Trigger reactivity
 		saveConversations();
 	}
 
@@ -1191,6 +1205,12 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		// Clear any leftover streaming state from previous runs
 		currentStreamingMessageIds.clear();
 		streamingCount = 0;
+		
+		// Track which conversation this run belongs to (for routing messages correctly)
+		streamingConversationId = currentConversationId;
+		
+		// Track which bots are pending (waiting for first token) for loading indicators
+		pendingBots = new Set(botsWithinLimit.map(b => b.id));
 
 		// Add user message
 		const userMsg: Message = {
@@ -1253,7 +1273,8 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 				model: bot.model,
 				system: getSystemInstructionText(bot),
 				max_tokens: bot.maxTokens || globalMaxTokens,
-				provider_key: providerKey // Will be null if not configured (backend falls back to env)
+				provider_key: providerKey, // Will be null if not configured (backend falls back to env)
+				web_search_enabled: bot.webSearchEnabled || false
 			};
 		}));
 		
@@ -1335,19 +1356,33 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			console.error('Error:', error);
 			// Don't show error message if it was an abort (user cancelled)
 			if (error instanceof Error && error.name !== 'AbortError') {
-				messages = [
-					...messages,
-					{
-						id: crypto.randomUUID(),
-						role: 'assistant',
-						content: `Error: ${error.message}`,
-						timestamp: Date.now()
-					}
-				];
+				// Route error message to correct conversation
+				const targetMessages = streamingConversationId === currentConversationId 
+					? messages 
+					: (conversationMessages[streamingConversationId!] || []);
+				
+				const errorMsg: Message = {
+					id: crypto.randomUUID(),
+					role: 'assistant',
+					content: `Error: ${error.message}`,
+					timestamp: Date.now()
+				};
+				
+				if (streamingConversationId === currentConversationId) {
+					messages = [...messages, errorMsg];
+				} else if (streamingConversationId) {
+					conversationMessages[streamingConversationId] = [...targetMessages, errorMsg];
+					// Mark conversation as having unread messages
+					unreadConversations.add(streamingConversationId);
+					unreadConversations = unreadConversations; // Trigger reactivity
+				}
 			}
 		} finally {
 			isLoading = false;
 			currentRunAbortController = null;
+			streamingConversationId = null;
+			pendingBots.clear();
+			pendingBots = pendingBots; // Trigger reactivity
 			// Refresh quota after message completion (quota was incremented on backend)
 			if ($isAuthenticated) {
 				quota.fetchQuota();
@@ -1362,9 +1397,43 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		// Clear streaming state so next message creates fresh responses
 		currentStreamingMessageIds.clear();
 		streamingCount = 0;
+		streamingConversationId = null;
+		pendingBots.clear();
+		pendingBots = pendingBots; // Trigger reactivity
 	}
 
 	async function streamEvents(runId: string) {
+		// Capture the conversation ID at the start of streaming
+		const targetConversationId = streamingConversationId;
+		
+		// Helper to get/set messages for the target conversation
+		function getTargetMessages(): Message[] {
+			if (targetConversationId === currentConversationId) {
+				return messages;
+			}
+			return conversationMessages[targetConversationId!] || [];
+		}
+		
+		function setTargetMessages(newMessages: Message[]) {
+			if (targetConversationId === currentConversationId) {
+				messages = newMessages;
+			} else if (targetConversationId) {
+				conversationMessages[targetConversationId] = newMessages;
+				// Mark as unread since user is viewing a different conversation
+				unreadConversations.add(targetConversationId);
+				unreadConversations = unreadConversations; // Trigger reactivity
+			}
+		}
+		
+		// Helper to get active bots for the target conversation
+		function getTargetActiveBots(): Bot[] {
+			if (targetConversationId === currentConversationId) {
+				return activeBots;
+			}
+			const conv = conversations.find(c => c.id === targetConversationId);
+			return conv?.activeBots || [];
+		}
+		
 		try {
 			const response = await fetch(`${API_BASE}/runs/${runId}/events`, {
 				headers: authHeaders(),
@@ -1396,11 +1465,18 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 							const data = JSON.parse(dataLine.substring(6));
 
 							if (eventType === 'panel_token') {
+								// Remove from pending bots on first token
+								pendingBots.delete(data.config_id);
+								pendingBots = pendingBots; // Trigger reactivity
+								
 								// Track streaming messages by config_id to avoid appending to previous responses
 								let messageId = currentStreamingMessageIds.get(data.config_id);
+								const targetMsgs = getTargetMessages();
+								const targetBots = getTargetActiveBots();
+								
 								if (!messageId) {
 									// First token for this response - create the message
-									const bot = activeBots.find((b) => b.id === data.config_id);
+									const bot = targetBots.find((b) => b.id === data.config_id);
 									const newMsg: Message = {
 										id: crypto.randomUUID(),
 										role: 'assistant',
@@ -1410,38 +1486,44 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										provider: bot?.provider,
 										model: bot?.model
 									};
-									messages = [...messages, newMsg];
+									setTargetMessages([...targetMsgs, newMsg]);
 									currentStreamingMessageIds.set(data.config_id, newMsg.id);
 									streamingCount = currentStreamingMessageIds.size; // Keep reactive counter in sync
 								} else {
 									// Append to the current streaming message
-									const msg = messages.find((m) => m.id === messageId);
+									const msg = targetMsgs.find((m) => m.id === messageId);
 									if (msg) {
 										msg.content += data.token;
-										messages = [...messages];
+										setTargetMessages([...targetMsgs]);
 									}
 								}
 							} else if (eventType === 'panel_final') {
+								// Remove from pending bots
+								pendingBots.delete(data.config_id);
+								pendingBots = pendingBots; // Trigger reactivity
+								
 								// Update or create final message
 								const messageId = currentStreamingMessageIds.get(data.config_id);
+								const targetMsgs = getTargetMessages();
+								const targetBots = getTargetActiveBots();
 								// Detect truncation from finish_reason
 								const TRUNCATION_REASONS = new Set(['length', 'max_tokens', 'MAX_TOKENS']);
 								const isTruncated = data.finish_reason && TRUNCATION_REASONS.has(data.finish_reason);
 								
 								if (messageId) {
 									// Update the streamed message with final content
-									const msg = messages.find((m) => m.id === messageId);
+									const msg = targetMsgs.find((m) => m.id === messageId);
 									if (msg) {
 										msg.content = data.final;
 										msg.isTruncated = isTruncated;
 										msg.finishReason = data.finish_reason;
-										messages = [...messages];
+										setTargetMessages([...targetMsgs]);
 									}
 									currentStreamingMessageIds.delete(data.config_id);
 									streamingCount = currentStreamingMessageIds.size;
 								} else {
 									// Fallback: create message if streaming didn't occur
-									const bot = activeBots.find((b) => b.id === data.config_id);
+									const bot = targetBots.find((b) => b.id === data.config_id);
 									const msg: Message = {
 										id: crypto.randomUUID(),
 										role: 'assistant',
@@ -1453,17 +1535,35 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										isTruncated,
 										finishReason: data.finish_reason
 									};
-									messages = [...messages, msg];
+									setTargetMessages([...targetMsgs, msg]);
+								}
+							} else if (eventType === 'panel_citations') {
+								// Handle web search citations
+								// Find the most recent message for this config_id and add citations
+								const targetMsgs = getTargetMessages();
+								const recentMessages = targetMsgs.filter(m => m.botId === data.config_id);
+								const targetMsg = recentMessages[recentMessages.length - 1];
+								if (targetMsg && data.citations) {
+									targetMsg.citations = data.citations;
+									setTargetMessages([...targetMsgs]); // Trigger reactivity
+									console.log(`[Citations] Added ${data.citations.length} citations to message for bot ${data.config_id}`);
 								}
 							} else if (eventType === 'panel_error') {
+								// Remove from pending bots
+								pendingBots.delete(data.config_id);
+								pendingBots = pendingBots; // Trigger reactivity
+								
 								// Handle provider-specific errors (including missing API keys)
 								const messageId = currentStreamingMessageIds.get(data.config_id);
-								const bot = activeBots.find((b) => b.id === data.config_id);
+								const targetMsgs = getTargetMessages();
+								const targetBots = getTargetActiveBots();
+								const bot = targetBots.find((b) => b.id === data.config_id);
 								const botLabel = bot ? `${bot.provider} (${bot.model})` : 'Unknown bot';
 								
 								// Remove any partial/blank streaming message for this bot
 								if (messageId) {
-									messages = messages.filter((m) => m.id !== messageId);
+									const filteredMsgs = targetMsgs.filter((m) => m.id !== messageId);
+									setTargetMessages(filteredMsgs);
 									currentStreamingMessageIds.delete(data.config_id);
 									streamingCount = currentStreamingMessageIds.size;
 								}
@@ -1472,7 +1572,8 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 								const errorMessage = `❌ **${botLabel}** failed: ${data.error}`;
 								
 								// Get the last user message for retry functionality
-								const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+								const currentTargetMsgs = getTargetMessages();
+								const lastUserMessage = currentTargetMsgs.filter(m => m.role === 'user').pop();
 								
 								const errorMsg: Message = {
 									id: crypto.randomUUID(),
@@ -1488,19 +1589,22 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 										attachments: globalAttachments
 									}
 								};
-								messages = [...messages, errorMsg];
+								setTargetMessages([...currentTargetMsgs, errorMsg]);
 							} else if (eventType === 'run_error') {
 								// Handle general run-level errors
+								const targetMsgs = getTargetMessages();
 								const errorMsg: Message = {
 									id: crypto.randomUUID(),
 									role: 'assistant',
 									content: `❌ **Run failed:** ${data.error}`,
 									timestamp: Date.now()
 								};
-								messages = [...messages, errorMsg];
+								setTargetMessages([...targetMsgs, errorMsg]);
 								// Clear all streaming state
 								currentStreamingMessageIds.clear();
 								streamingCount = 0;
+								pendingBots.clear();
+								pendingBots = pendingBots;
 							} else if (eventType === 'run_done') {
 								// Run completed - update quota immediately if included
 								if (data.quota) {
@@ -1945,7 +2049,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 			<div class="flex items-center justify-between">
 				<div class="flex items-end gap-3">
 					<h1 class="text-4xl font-extrabold leading-none">botchat</h1>
-					<p class="text-blue-100 text-xs leading-tight">many minds<br/>no memory</p>
+					<p class="text-blue-100 text-xs leading-tight hidden sm:block">many minds<br/>no memory</p>
 					<span class="px-1.5 py-0.5 bg-amber-400 text-amber-900 text-[10px] font-bold rounded uppercase tracking-wide">Beta</span>
 				</div>
 				<div class="flex items-center gap-4">
@@ -2236,6 +2340,10 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 								class="px-2 py-0.5 text-xs bg-white dark:bg-gray-800 border border-blue-500 rounded text-gray-900 dark:text-white focus:outline-none flex-1 min-w-0"
 							/>
 						{:else}
+							<!-- Unread indicator (blue pulsing dot) -->
+							{#if unreadConversations.has(conv.id)}
+								<span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="New messages"></span>
+							{/if}
 							<span
 								class="max-w-[120px] truncate cursor-pointer hover:underline"
 								on:dblclick={() => startRenaming(conv.id, conv.name)}
@@ -2397,7 +2505,7 @@ active bots counts as 3 bot messages"
 			{/if}
 
 			<!-- Messages Container -->
-			<ChatMessages {messages} activeBots={activeBots} />
+			<ChatMessages {messages} activeBots={activeBots} {pendingBots} />
 			
 			<!-- Mobile Active Bots (using dedicated mobile component) -->
 			<div class="md:hidden">
@@ -2458,7 +2566,15 @@ active bots counts as 3 bot messages"
 											on:click={() => openEditActiveBot(bot)}
 											class="flex flex-col text-left hover:opacity-80 transition"
 										>
-											<span class="text-xs font-medium {botValid ? colors.text : 'text-red-700 dark:text-red-300'}">{bot.name || bot.provider}</span>
+											<span class="text-xs font-medium {botValid ? colors.text : 'text-red-700 dark:text-red-300'} flex items-center gap-1">
+												{bot.name || bot.provider}
+												{#if bot.webSearchEnabled}
+													<svg class="w-3 h-3 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+														<title>Web search enabled</title>
+														<path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+													</svg>
+												{/if}
+											</span>
 											<span class="text-[10px] {botValid ? colors.subtext : 'text-red-600 dark:text-red-400 line-through'}">{bot.provider} • {bot.model}</span>
 										</button>
 										<button
@@ -2789,6 +2905,7 @@ active bots counts as 3 bot messages"
 		canCreateChat={canCreateConversation}
 		maxChats={$tierLimits.maxConversations}
 		isStreaming={isStreaming}
+		unreadChats={unreadConversations}
 		on:select={(e) => handleMobileConversationSelect(e.detail)}
 		on:delete={(e) => handleMobileConversationDelete(e.detail)}
 		on:rename={(e) => handleMobileConversationRename(e.detail)}

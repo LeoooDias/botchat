@@ -12,6 +12,7 @@
 		name?: string;
 		maxTokens?: number;
 		category?: string;
+		webSearchEnabled?: boolean;
 	}
 
 	interface Category {
@@ -34,6 +35,7 @@
 	let botName = '';
 	let maxTokens: number | undefined = undefined;
 	let systemInstructionFile: File | null = null;
+	let webSearchEnabled = false;
 
 	// Reactive validation for maxTokens
 	const MIN_TOKENS = 100;
@@ -108,7 +110,8 @@
 			systemInstructionText: systemInstructionText || undefined,
 			name: botName || undefined,
 			maxTokens: maxTokens || undefined,
-			category: selectedCategory || undefined
+			category: selectedCategory || undefined,
+			webSearchEnabled: webSearchEnabled || undefined
 		};
 
 		dispatch('save', bot);
@@ -121,6 +124,7 @@
 		systemInstructionFile = null;
 		systemInstructionText = '';
 		selectedCategory = '';
+		webSearchEnabled = false;
 	}
 
 	$: availableModels = providers.find((p) => p.value === selectedProvider)?.models || [];
@@ -301,6 +305,29 @@
 			<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
 				Organize bots in collapsible categories. Create categories in the Bots section above.
 			</p>
+		</div>
+
+		<!-- Web Search -->
+		<div class="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+			<label class="relative inline-flex items-center cursor-pointer">
+				<input
+					type="checkbox"
+					bind:checked={webSearchEnabled}
+					class="sr-only peer"
+				/>
+				<div class="w-9 h-5 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+			</label>
+			<div class="flex-1">
+				<div class="flex items-center gap-1.5">
+					<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Web Search</span>
+					<svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+					</svg>
+				</div>
+				<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+					Allow this bot to search the web for current information. Citations will be shown.
+				</p>
+			</div>
 		</div>
 
 		<!-- Save & Add Button -->

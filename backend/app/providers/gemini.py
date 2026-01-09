@@ -252,7 +252,8 @@ class GeminiProvider:
         max_tokens: int = 4000,
         file_data: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 1.0,
-    ) -> Generator[str, None, None]:
+        web_search_enabled: bool = False,
+    ) -> Generator[str, None, Dict[str, Any]]:
         """
         Stream a response from Gemini.
         
@@ -263,9 +264,13 @@ class GeminiProvider:
             max_tokens: Maximum output tokens
             file_data: Optional list of file attachments [{bytes, mime_type, name}]
             temperature: Sampling temperature (0.0-2.0)
+            web_search_enabled: Enable Google Search grounding for real-time info
             
         Yields:
             Text chunks as they arrive
+            
+        Returns:
+            Dict with 'citations' list containing web search sources (via generator return)
         """
         # Validate model
         if model not in SUPPORTED_MODELS:
@@ -318,6 +323,12 @@ class GeminiProvider:
             ],
         )
         
+        # Add Google Search tool for web grounding if enabled
+        if web_search_enabled:
+            google_search_tool = types.Tool(google_search=types.GoogleSearch())
+            config.tools = [google_search_tool]
+            logger.debug("Web search enabled for Gemini request")
+        
         if system_instruction:
             # Apply PII scrubber to system_instruction as well
             processed_system_instruction = system_instruction
@@ -328,6 +339,7 @@ class GeminiProvider:
             config.system_instruction = processed_system_instruction
         
         # Stream response
+        citations: List[Dict[str, Any]] = []
         try:
             response_stream = self.client.models.generate_content_stream(  # type: ignore[misc]
                 model=model,
@@ -335,9 +347,36 @@ class GeminiProvider:
                 config=config,
             )
             
+            final_response = None
             for chunk in response_stream:
+                final_response = chunk  # Keep track of final chunk for grounding metadata
                 if chunk.text:
                     yield chunk.text
+            
+            # Extract citations from grounding metadata (available in final response)
+            if web_search_enabled and final_response:
+                try:
+                    grounding_metadata = getattr(
+                        final_response.candidates[0] if final_response.candidates else None,
+                        'grounding_metadata', None
+                    )
+                    if grounding_metadata:
+                        grounding_chunks = getattr(grounding_metadata, 'grounding_chunks', []) or []
+                        for idx, gc in enumerate(grounding_chunks):
+                            web_info = getattr(gc, 'web', None)
+                            if web_info:
+                                citations.append({
+                                    'index': idx + 1,
+                                    'url': getattr(web_info, 'uri', ''),
+                                    'title': getattr(web_info, 'title', 'Source'),
+                                })
+                        if citations:
+                            logger.debug("Extracted %d citations from Gemini grounding", len(citations))
+                except Exception as e:
+                    logger.warning("Failed to extract Gemini citations: %s", type(e).__name__)
+            
+            # Return citations via generator return value
+            return {'citations': citations}
                     
         except Exception as e:
             # Tightened logging: avoid leaking prompts via exception strings
@@ -581,7 +620,8 @@ def stream_gemini(
     file_data: Optional[List[Dict[str, Any]]] = None,
     allowed_regions: Optional[List[str]] = None,
     pii_scrubber: Optional[Callable[[str], str]] = None,
-) -> Generator[str, None, None]:
+    web_search_enabled: bool = False,
+) -> Generator[str, None, Dict[str, Any]]:
     """
     Stream a Gemini response.
     
@@ -596,22 +636,27 @@ def stream_gemini(
         file_data: Optional file attachments
         allowed_regions: Optional list of allowed GCP regions (Vertex AI only)
         pii_scrubber: Optional callback to scrub PII before sending
+        web_search_enabled: Enable Google Search grounding tool
         
     Yields:
         Text chunks
+        
+    Returns:
+        Dict with 'citations' list when web search is enabled
     """
     provider = GeminiProvider(
         api_key=api_key, 
         allowed_regions=allowed_regions,
         pii_scrubber=pii_scrubber,
     )
-    yield from provider.stream(
+    return (yield from provider.stream(
         message=message,
         model=model,
         system_instruction=system_instruction,
         max_tokens=max_tokens,
         file_data=file_data,
-    )
+        web_search_enabled=web_search_enabled,
+    ))
 
 
 def get_gemini_privacy_info(api_key: Optional[str] = None) -> Dict[str, Any]:

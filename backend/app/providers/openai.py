@@ -280,7 +280,8 @@ class OpenAIProvider:
         temperature: float = 1.0,
         user_id: Optional[str] = None,
         pii_scrubber: Optional[Callable[[str], str]] = None,
-    ) -> Generator[str, None, None]:
+        web_search_enabled: bool = False,
+    ) -> Generator[str, None, Dict[str, Any]]:
         """
         Stream a response from OpenAI.
         
@@ -296,9 +297,13 @@ class OpenAIProvider:
                     Sent as safety_identifier to OpenAI.
             pii_scrubber: Optional callback function to scrub PII from messages
                          before sending to the API. Signature: (str) -> str
+            web_search_enabled: Enable web search tool (uses Responses API)
             
         Yields:
             Text chunks as they arrive
+            
+        Returns:
+            Dict with 'citations' list when web search is enabled
         """
         # Validate model
         if model not in SUPPORTED_MODELS:
@@ -321,6 +326,19 @@ class OpenAIProvider:
         
         # Validate user_id to ensure it's not raw PII
         validated_user_id = _validate_user_id(user_id)
+        
+        # Track citations for web search
+        citations: List[Dict[str, Any]] = []
+        
+        # Web search uses Responses API (different from Chat Completions)
+        if web_search_enabled:
+            return (yield from self._stream_with_web_search(
+                processed_message, model, processed_system, max_tokens, 
+                temperature, validated_user_id
+            ))
+        
+        # Build messages for Chat Completions API
+        messages = self._build_messages(processed_message, model, processed_system, file_data)
         
         # Build request parameters
         # IMPORTANT: store=False disables OpenAI's request/response storage
@@ -397,6 +415,160 @@ class OpenAIProvider:
                 gc.collect()
             except Exception:
                 pass  # Cleanup is best-effort
+        
+        # Return empty citations for non-web-search requests
+        return {'citations': citations}
+    
+    def _stream_with_web_search(
+        self,
+        message: str,
+        model: str,
+        system_instruction: Optional[str],
+        max_tokens: int,
+        temperature: float,
+        user_id: Optional[str],
+    ) -> Generator[str, None, Dict[str, Any]]:
+        """
+        Stream a response with web search using OpenAI Responses API.
+        
+        The Responses API supports the web_search_preview tool, which enables
+        the model to search the web and cite sources.
+        
+        Args:
+            message: User message
+            model: Model name
+            system_instruction: Optional system prompt
+            max_tokens: Maximum output tokens
+            temperature: Sampling temperature
+            user_id: Optional hashed user ID
+            
+        Yields:
+            Text chunks
+            
+        Returns:
+            Dict with 'citations' list
+        """
+        citations: List[Dict[str, Any]] = []
+        
+        try:
+            # Build input with system instruction if provided
+            input_content: Any = message
+            if system_instruction and model not in NO_SYSTEM_INSTRUCTION_MODELS:
+                input_content = [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": message},
+                ]
+            elif system_instruction:
+                # For reasoning models, prepend system instruction
+                input_content = f"[Instructions]\n{system_instruction}\n\n[User Message]\n{message}"
+            
+            # Build request parameters for Responses API
+            request_params: Dict[str, Any] = {
+                "model": model,
+                "input": input_content,
+                "tools": [{"type": "web_search_preview"}],
+                "stream": True,
+                "store": False,  # Privacy: disable storage
+            }
+            
+            # Add optional parameters
+            if model not in NO_SYSTEM_INSTRUCTION_MODELS:
+                request_params["max_output_tokens"] = max_tokens
+                request_params["temperature"] = temperature
+            else:
+                request_params["max_output_tokens"] = max_tokens
+            
+            if user_id:
+                request_params["user"] = user_id
+            
+            logger.debug("OpenAI web search: using Responses API with web_search_preview tool")
+            
+            # Stream using Responses API
+            # Note: responses.create returns a different structure than chat.completions
+            response_stream = self.client.responses.create(**request_params)
+            
+            # Track text content and annotations from output items
+            collected_text: List[str] = []
+            collected_annotations: List[Dict[str, Any]] = []
+            
+            for event in response_stream:
+                # Handle different event types from Responses API streaming
+                event_type = getattr(event, 'type', '')
+                
+                if event_type == 'response.output_text.delta':
+                    # Text chunk from the model
+                    delta = getattr(event, 'delta', '')
+                    if delta:
+                        collected_text.append(delta)
+                        yield delta
+                        
+                elif event_type == 'response.output_text.done':
+                    # Final text with annotations
+                    text_obj = getattr(event, 'text', None)
+                    if text_obj:
+                        annotations = getattr(text_obj, 'annotations', [])
+                        for ann in annotations:
+                            if getattr(ann, 'type', '') == 'url_citation':
+                                collected_annotations.append({
+                                    'url': getattr(ann, 'url', ''),
+                                    'title': getattr(ann, 'title', 'Source'),
+                                    'start_index': getattr(ann, 'start_index', 0),
+                                    'end_index': getattr(ann, 'end_index', 0),
+                                })
+                                
+                elif event_type == 'response.done':
+                    # Response complete - extract any remaining annotations
+                    response_obj = getattr(event, 'response', None)
+                    if response_obj:
+                        output_items = getattr(response_obj, 'output', [])
+                        for item in output_items:
+                            if getattr(item, 'type', '') == 'message':
+                                content_list = getattr(item, 'content', [])
+                                for content in content_list:
+                                    if getattr(content, 'type', '') == 'output_text':
+                                        for ann in getattr(content, 'annotations', []):
+                                            if getattr(ann, 'type', '') == 'url_citation':
+                                                # Avoid duplicates
+                                                url = getattr(ann, 'url', '')
+                                                if not any(c['url'] == url for c in collected_annotations):
+                                                    collected_annotations.append({
+                                                        'url': url,
+                                                        'title': getattr(ann, 'title', 'Source'),
+                                                        'start_index': getattr(ann, 'start_index', 0),
+                                                        'end_index': getattr(ann, 'end_index', 0),
+                                                    })
+            
+            # Build citations from collected annotations
+            for idx, ann in enumerate(collected_annotations):
+                citations.append({
+                    'index': idx + 1,
+                    'url': ann['url'],
+                    'title': ann['title'],
+                })
+            
+            if citations:
+                logger.debug("Extracted %d citations from OpenAI web search", len(citations))
+                
+        except Exception as e:
+            status_code = getattr(e, "status_code", "n/a")
+            error_code = getattr(e, "code", "n/a")
+            logger.error("OpenAI web search error (%s, status=%s)", type(e).__name__, status_code)
+            
+            error_msg = str(e)
+            error_lower = error_msg.lower()
+            
+            if "429" in error_msg or "rate" in error_lower:
+                raise RateLimitError("Rate limited by OpenAI API. Please try again later.") from None
+            elif "401" in error_msg or "invalid_api_key" in error_lower:
+                raise AuthenticationError("Invalid API key. Please check your OpenAI API key.") from None
+            elif "403" in error_msg or "permission" in error_lower:
+                raise AuthenticationError("Permission denied. Your API key may lack required permissions.") from None
+            elif "responses" in error_lower or "not supported" in error_lower:
+                raise OpenAIAPIError("Web search requires a compatible model and API version.") from None
+            else:
+                raise OpenAIAPIError("OpenAI API error. Please try again.") from None
+        
+        return {'citations': citations}
     
     def _build_messages(
         self,
@@ -587,7 +759,8 @@ def stream_openai(
     file_data: Optional[List[Dict[str, Any]]] = None,
     temperature: float = 1.0,
     user_id: Optional[str] = None,
-) -> Generator[str, None, None]:
+    web_search_enabled: bool = False,
+) -> Generator[str, None, Dict[str, Any]]:
     """
     Stream an OpenAI response.
     
@@ -602,12 +775,16 @@ def stream_openai(
         file_data: Optional file attachments
         temperature: Sampling temperature
         user_id: Optional hashed user ID for privacy-preserving abuse monitoring
+        web_search_enabled: Enable web search tool
         
     Yields:
         Text chunks
+        
+    Returns:
+        Dict with 'citations' list when web search is enabled
     """
     provider = OpenAIProvider(api_key=api_key)
-    yield from provider.stream(
+    return (yield from provider.stream(
         message=message,
         model=model,
         system_instruction=system_instruction,
@@ -615,7 +792,8 @@ def stream_openai(
         file_data=file_data,
         temperature=temperature,
         user_id=user_id,
-    )
+        web_search_enabled=web_search_enabled,
+    ))
 
 
 def get_openai_privacy_info(api_key: Optional[str] = None) -> Dict[str, Any]:

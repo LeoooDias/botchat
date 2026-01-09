@@ -269,7 +269,8 @@ class AnthropicProvider:
         user_id: Optional[str] = None,
         enable_prompt_caching: bool = False,
         pii_scrubber: Optional[Callable[[str], str]] = None,
-    ) -> Generator[str, None, None]:
+        web_search_enabled: bool = False,
+    ) -> Generator[str, None, Dict[str, Any]]:
         """
         Stream a response from Anthropic.
         
@@ -286,13 +287,20 @@ class AnthropicProvider:
                                   for API compatibility in case provider defaults change.
             pii_scrubber: Optional callback function to scrub PII from messages
                          before sending to the API. Signature: (str) -> str
+            web_search_enabled: Enable web search tool (uses Brave-powered search)
             
         Yields:
             Text chunks as they arrive
+            
+        Returns:
+            Dict with 'citations' list when web search is enabled
         """
         # Validate model
         if model not in SUPPORTED_MODELS:
             logger.warning("Model '%s' not in supported list, attempting anyway", model)
+        
+        # Track citations for web search
+        citations: List[Dict[str, Any]] = []
         
         # Privacy Control: Apply PII scrubbing if configured
         processed_message = message
@@ -320,6 +328,18 @@ class AnthropicProvider:
             "temperature": temperature,
         }
         
+        # Add web search tool if enabled
+        # Uses Anthropic's web_search tool (Brave-powered)
+        # Requires beta header: anthropic-beta: web-search-2025-03-05
+        web_search_tools = None
+        if web_search_enabled:
+            web_search_tools = [{
+                "type": "web_search_20250305",
+                "name": "web_search",
+            }]
+            request_params["tools"] = web_search_tools
+            logger.debug("Anthropic web search: enabled web_search_20250305 tool")
+        
         # Add validated user ID for privacy-preserving abuse monitoring
         # This helps Anthropic with rate limiting and abuse detection without storing PII
         if validated_user_id:
@@ -339,9 +359,84 @@ class AnthropicProvider:
         
         # Stream response
         try:
-            with self.client.messages.stream(**request_params) as stream:
-                for text in stream.text_stream:
-                    yield text
+            if web_search_enabled:
+                # Web search requires handling tool_use blocks and citations
+                # Use beta.messages for web search beta feature
+                # Use non-streaming first to get full response with tool results
+                response = self.client.beta.messages.create(
+                    **request_params,
+                    stream=False,
+                    betas=["web-search-2025-03-05"]
+                )
+                
+                # Log response structure for debugging
+                logger.debug("Anthropic web search response: %d content blocks", len(response.content))
+                
+                # Process response content blocks
+                # Block types from web search:
+                # - server_tool_use: The model's request to perform web search
+                # - web_search_tool_result: Results from the search
+                # - text: Generated text (may contain citations)
+                for block in response.content:
+                    block_type = getattr(block, 'type', '')
+                    logger.debug("Processing block type: %s", block_type)
+                    
+                    if block_type == 'server_tool_use':
+                        # Server-side tool use (web search being invoked)
+                        tool_name = getattr(block, 'name', '')
+                        if tool_name == 'web_search':
+                            tool_input = getattr(block, 'input', {})
+                            logger.debug("Web search performed: query=%s", 
+                                       tool_input.get('query', 'unknown'))
+                    
+                    elif block_type == 'web_search_tool_result':
+                        # Search results - extract citations from here
+                        result_content = getattr(block, 'content', [])
+                        for result in result_content:
+                            result_type = getattr(result, 'type', '')
+                            if result_type == 'web_search_result':
+                                url = getattr(result, 'url', '')
+                                title = getattr(result, 'title', 'Source')
+                                # Add to citations if not duplicate
+                                if url and not any(c['url'] == url for c in citations):
+                                    citations.append({
+                                        'index': len(citations) + 1,
+                                        'url': url,
+                                        'title': title,
+                                    })
+                        logger.debug("Extracted %d citations from web_search_tool_result", len(citations))
+                    
+                    elif block_type == 'text':
+                        text_content = getattr(block, 'text', '')
+                        
+                        # Also check for inline citations in the text block
+                        block_citations = getattr(block, 'citations', [])
+                        if block_citations:
+                            for cite in block_citations:
+                                cite_type = getattr(cite, 'type', '')
+                                if cite_type == 'web_search_result_location':
+                                    url = getattr(cite, 'url', '')
+                                    title = getattr(cite, 'title', 'Source')
+                                    # Avoid duplicates
+                                    if url and not any(c['url'] == url for c in citations):
+                                        citations.append({
+                                            'index': len(citations) + 1,
+                                            'url': url,
+                                            'title': title,
+                                        })
+                        
+                        # Yield text in chunks to maintain streaming behavior
+                        chunk_size = 100
+                        for i in range(0, len(text_content), chunk_size):
+                            yield text_content[i:i+chunk_size]
+                
+                if citations:
+                    logger.debug("Total citations from Anthropic web search: %d", len(citations))
+            else:
+                # Standard streaming without web search
+                with self.client.messages.stream(**request_params) as stream:
+                    for text in stream.text_stream:
+                        yield text
                     
         except anthropic.RateLimitError as e:
             logger.error("Anthropic rate limit error (%s)", type(e).__name__)
@@ -368,9 +463,11 @@ class AnthropicProvider:
             # Extract only safe attributes - NEVER use %r which may expose request content
             status_code = getattr(e, "status_code", "n/a")
             error_code = getattr(e, "code", "n/a")
-            logger.error("Anthropic streaming error (%s)", type(e).__name__)
+            # Log full error type and message for debugging (avoid request content)
+            error_message = str(e) if len(str(e)) < 500 else str(e)[:500] + "..."
+            logger.error("Anthropic streaming error (%s): %s", type(e).__name__, error_message)
             logger.debug("Anthropic error attrs: status=%s, code=%s", status_code, error_code)
-            raise AnthropicAPIError("Anthropic API error. Please try again.") from None
+            raise AnthropicAPIError(f"Anthropic API error: {type(e).__name__}") from None
         finally:
             # Best-effort memory cleanup for sensitive data
             # Python doesn't offer secure memory wiping, but explicit deletion
@@ -384,6 +481,9 @@ class AnthropicProvider:
                 gc.collect()
             except Exception:
                 pass  # Cleanup is best-effort
+        
+        # Return citations
+        return {'citations': citations}
     
     def _build_messages(
         self,
@@ -561,7 +661,8 @@ def stream_anthropic(
     temperature: float = 1.0,
     user_id: Optional[str] = None,
     enable_prompt_caching: bool = False,
-) -> Generator[str, None, None]:
+    web_search_enabled: bool = False,
+) -> Generator[str, None, Dict[str, Any]]:
     """
     Stream an Anthropic response.
     
@@ -577,12 +678,16 @@ def stream_anthropic(
         temperature: Sampling temperature
         user_id: Optional hashed user ID for privacy-preserving abuse monitoring
         enable_prompt_caching: IGNORED (forced False for privacy)
+        web_search_enabled: Enable web search tool
         
     Yields:
         Text chunks
+        
+    Returns:
+        Dict with 'citations' list when web search is enabled
     """
     provider = AnthropicProvider(api_key=api_key)
-    yield from provider.stream(
+    return (yield from provider.stream(
         message=message,
         model=model,
         system_instruction=system_instruction,
@@ -591,7 +696,8 @@ def stream_anthropic(
         temperature=temperature,
         user_id=user_id,
         enable_prompt_caching=enable_prompt_caching,
-    )
+        web_search_enabled=web_search_enabled,
+    ))
 
 
 def get_anthropic_privacy_info(api_key: Optional[str] = None) -> Dict[str, Any]:
