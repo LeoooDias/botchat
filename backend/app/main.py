@@ -352,6 +352,30 @@ class VerifyKeyRequest(BaseModel):
     api_key: str
 
 
+# Persona Wizard Models
+class WizardWordsRequest(BaseModel):
+    """Request for generating persona trait words."""
+    selected_words: List[str] = []  # Previously selected words to inform new suggestions
+    round_number: int = 1  # Which round of selection (affects diversity)
+
+
+class WizardWordsResponse(BaseModel):
+    """Response with trait words for the wizard grid."""
+    words: List[str]  # 16 words for the grid
+
+
+class WizardGenerateRequest(BaseModel):
+    """Request to generate a full persona from selected traits."""
+    name: str  # Bot name (required)
+    selected_words: List[str]  # All selected trait words
+    custom_words: List[str] = []  # User-added custom words
+
+
+class WizardGenerateResponse(BaseModel):
+    """Response with generated persona instruction."""
+    instruction: str  # Full system instruction text
+
+
 # -----------------------------
 # In-memory run state (dev-only)
 # -----------------------------
@@ -1518,6 +1542,210 @@ async def stream_events(run_id: str, api_key=Depends(require_api_key)):
                         logger.debug("Purged run %s after stream closed", run_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# -----------------------------
+# Persona Wizard Endpoints
+# -----------------------------
+
+# System prompts for wizard LLM calls
+WIZARD_WORDS_SYSTEM = """You are a creative assistant helping users build AI persona profiles through word selection.
+
+Your task: Generate exactly 16 single words or short phrases (2-3 words max) that describe personality traits, expertise areas, communication styles, or behavioral characteristics.
+
+Guidelines:
+- Mix categories: ~4 tone/style words, ~4 domain/expertise words, ~4 behavioral traits, ~4 creative/unique descriptors
+- Words should be evocative but accessible
+- Avoid jargon unless domain-specific expertise is being built
+- Each word should meaningfully differentiate a persona
+- Balance between complementary and contrasting traits
+
+Output format: Return ONLY a JSON array of exactly 16 strings, nothing else.
+Example: ["analytical", "empathetic", "strategic", "concise", "tech-savvy", "risk-aware", ...]"""
+
+WIZARD_WORDS_WITH_CONTEXT_SYSTEM = """You are a creative assistant helping users build AI persona profiles through word selection.
+
+The user has already selected some traits. Generate 16 NEW words that:
+1. Complement or meaningfully contrast with their selections
+2. Help refine and deepen the persona
+3. Explore adjacent concepts they might not have considered
+4. NEVER repeat any previously selected words
+
+Guidelines:
+- Mix categories: tone/style, domain/expertise, behavioral traits, creative descriptors
+- Build coherence while offering fresh directions
+- Words should feel like natural extensions or interesting counterpoints
+
+Output format: Return ONLY a JSON array of exactly 16 strings, nothing else."""
+
+WIZARD_GENERATE_SYSTEM = """You are an expert at crafting detailed AI persona instructions for a multi-persona group chat application. You create rich, consistent personalities for AI advisors that feel authentic, useful, and behave correctly in group discussions.
+
+Your task: Generate a complete system instruction for an AI persona based on the user's selected trait words and chosen name.
+
+The instruction MUST follow this exact structure with all sections:
+
+---
+
+1. OPENING IDENTITY (required):
+"You are [Name], a [role/expertise description woven from the traits]."
+"You are participating in a multi-persona group discussion. You contribute [your unique perspective] unless explicitly asked to evaluate or summarize another participant's comments."
+
+2. CORE WORLDVIEW (required):
+A section titled "CORE WORLDVIEW" with 2-4 sentences capturing the persona's fundamental beliefs, philosophy, and approach to problems.
+
+3. PRIMARY FOCUS AREAS (required):
+A section titled "PRIMARY FOCUS AREAS" with a bullet list of 4-6 specific areas of expertise or concern.
+
+4. BEHAVIORAL CONSTRAINTS (required):
+A section titled "BEHAVIORAL CONSTRAINTS" with two subsections:
+"You will:" - 3-4 positive behaviors
+"You will not:" - 3-4 things to avoid
+
+5. DISCOURSE & IDENTITY RULES (CRITICAL) (required - use this exact text):
+A section titled "DISCOURSE & IDENTITY RULES (CRITICAL)" containing:
+"These rules govern how you participate in group conversation:
+• When answering a general question posed to the group, speak only for yourself, in the first person ("I think…", "My view is…").
+• When asked about another participant's response, analyze their ideas, referring to them in the third person by name.
+• Do not correct the user for referring to another participant by name; assume correct attribution unless genuinely ambiguous.
+• Refer to yourself in the third person only if explicitly asked to reflect on or critique your own prior statement.
+• Never speak as another participant, merge identities, or defensively assert who you are."
+
+6. DEFAULT RESPONSE SHAPE (required):
+A section titled "DEFAULT RESPONSE SHAPE" with a numbered list of 4 elements describing how the persona structures typical responses.
+
+7. TONE ANCHORS (required):
+A section titled "TONE ANCHORS" with 3-5 adjectives or short phrases capturing communication style.
+
+8. SELF-REFERENCE OVERRIDE (required - use this exact text):
+"Self-Reference Override (Critical):
+If a question is addressed to the group (e.g., "what do you all think of X's response"), and you are X, you must respond in the first person, treating the question as an invitation to add, clarify, or extend your view — not to analyze yourself as a third party.
+In such cases, do not refer to yourself by name. Speak as "I"."
+
+---
+
+CRITICAL REQUIREMENTS:
+- Include ALL sections above - do not skip any
+- Use clear section headers with formatting (bold or caps)
+- The DISCOURSE & IDENTITY RULES and SELF-REFERENCE OVERRIDE sections are mandatory for group chat functionality
+- Weave the selected traits naturally into the identity, worldview, focus areas, and constraints
+- Make the persona feel genuine and distinct, not generic
+- Total length should be 600-900 words to ensure completeness"""
+
+
+@app.post("/wizard/words", response_model=WizardWordsResponse)
+async def wizard_generate_words(req: WizardWordsRequest):
+    """Generate 16 trait words for the persona wizard grid.
+    
+    Uses Gemini Flash Lite for cost efficiency (~$0.0001 per call).
+    No authentication required - this is a low-cost, low-risk endpoint.
+    """
+    try:
+        # Use Vertex AI with platform credentials (cheapest option)
+        provider = NativeGeminiProvider(api_key=None)  # Platform mode
+        
+        # Build prompt based on whether user has prior selections
+        if req.selected_words:
+            user_prompt = f"""Previously selected traits: {', '.join(req.selected_words)}
+
+Round {req.round_number} of selection. Generate 16 fresh words that complement or contrast with these selections.
+Remember: Return ONLY a JSON array of 16 strings."""
+            system = WIZARD_WORDS_WITH_CONTEXT_SYSTEM
+        else:
+            user_prompt = "Generate 16 diverse personality trait words for building an AI advisor persona. Return ONLY a JSON array of 16 strings."
+            system = WIZARD_WORDS_SYSTEM
+        
+        # Use the cheapest model
+        response_text = ""
+        for chunk in provider.stream(
+            model="gemini-2.5-flash-lite",
+            message=user_prompt,
+            system_instruction=system,
+            max_tokens=500,
+            temperature=0.9,  # Higher temperature for creativity
+        ):
+            response_text += chunk
+        
+        # Parse JSON response
+        response_text = response_text.strip()
+        # Handle potential markdown code blocks
+        if response_text.startswith("```"):
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+        
+        words = json.loads(response_text)
+        
+        # Validate and clean
+        if not isinstance(words, list):
+            raise ValueError("Response is not a list")
+        
+        # Filter out any previously selected words that might have slipped through
+        words = [w for w in words if w.lower() not in [s.lower() for s in req.selected_words]]
+        
+        # Ensure we have exactly 16 words (pad or truncate)
+        while len(words) < 16:
+            words.append("thoughtful")  # Fallback padding
+        words = words[:16]
+        
+        return WizardWordsResponse(words=words)
+        
+    except json.JSONDecodeError as e:
+        logger.error("Wizard words JSON parse error: %s", str(e))
+        # Return fallback words on parse error
+        fallback = [
+            "analytical", "empathetic", "strategic", "concise",
+            "creative", "cautious", "bold", "methodical",
+            "pragmatic", "visionary", "detail-oriented", "big-picture",
+            "collaborative", "independent", "patient", "decisive"
+        ]
+        return WizardWordsResponse(words=fallback)
+    except Exception as e:
+        logger.error("Wizard words generation error: %s", str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate words")
+
+
+@app.post("/wizard/generate", response_model=WizardGenerateResponse)
+async def wizard_generate_persona(req: WizardGenerateRequest):
+    """Generate a full persona instruction from selected traits.
+    
+    Uses Gemini Flash for quality at reasonable cost (~$0.001 per call).
+    No authentication required - output is returned to user, not stored.
+    """
+    if not req.name or not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    
+    if len(req.selected_words) + len(req.custom_words) < 3:
+        raise HTTPException(status_code=400, detail="At least 3 trait words required")
+    
+    try:
+        provider = NativeGeminiProvider(api_key=None)  # Platform mode
+        
+        all_traits = req.selected_words + req.custom_words
+        
+        user_prompt = f"""Create a persona instruction for an AI advisor with:
+
+Name: {req.name.strip()}
+
+Selected traits: {', '.join(all_traits)}
+
+Generate a complete, well-structured system instruction following the format I described.
+Make {req.name} feel like a real, distinct personality - not a generic assistant."""
+        
+        response_text = ""
+        for chunk in provider.stream(
+            model="gemini-2.5-flash",  # Slightly better model for quality output
+            message=user_prompt,
+            system_instruction=WIZARD_GENERATE_SYSTEM,
+            max_tokens=4000,
+            temperature=0.7,
+        ):
+            response_text += chunk
+        
+        return WizardGenerateResponse(instruction=response_text.strip())
+        
+    except Exception as e:
+        logger.error("Wizard persona generation error: %s", str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate persona")
 
 
 @app.post("/runs/{run_id}/synthesize")

@@ -2,6 +2,7 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { getMaxOutput } from '$lib/modelLimits';
 	import { getUserItem } from '$lib/utils/userStorage';
+	import PersonaWizard from './PersonaWizard.svelte';
 
 	interface Bot {
 		id: string;
@@ -50,6 +51,7 @@
 	let systemInstructionText = '';
 	let selectedCategory = '';
 	let categories: Category[] = [];
+	let showPersonaWizard = false;
 
 	onMount(() => {
 		// Load categories from user-namespaced storage
@@ -147,6 +149,13 @@
 	export function refreshCategories() {
 		loadCategories();
 	}
+
+	function handlePersonaGenerated(event: CustomEvent<{ name: string; instruction: string }>) {
+		const { name, instruction } = event.detail;
+		botName = name;
+		systemInstructionText = instruction;
+		showPersonaWizard = false;
+	}
 </script>
 
 <div>
@@ -198,6 +207,18 @@
 						<div class="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-8 border-r-8 border-t-8 border-transparent border-t-gray-900"></div>
 					</div>
 				</div>
+				<!-- Persona Wizard Button -->
+				<button
+					type="button"
+					on:click={() => showPersonaWizard = true}
+					class="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
+					title="Use AI to create a persona"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+					</svg>
+					Wizard
+				</button>
 			</div>
 			
 			<!-- Text Area -->
@@ -340,3 +361,10 @@
 		</button>
 	</div>
 </div>
+
+<!-- Persona Wizard Modal -->
+<PersonaWizard 
+	isOpen={showPersonaWizard} 
+	on:close={() => showPersonaWizard = false}
+	on:generate={handlePersonaGenerated}
+/>
