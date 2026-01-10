@@ -15,6 +15,7 @@
 	import AlertModal from '$lib/components/AlertModal.svelte';
 	import IntroModal from '$lib/components/IntroModal.svelte';
 	import EditBotDialog from '$lib/components/EditBotDialog.svelte';
+	import BotWizard from '$lib/components/BotWizard.svelte';
 	// Mobile components
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import MobileHeader from '$lib/components/MobileHeader.svelte';
@@ -134,6 +135,8 @@
 	let currentRunAbortController: AbortController | null = null; // For cancelling in-flight requests
 	let removeAllConfirmOpen = false; // Remove all bots confirmation modal
 	let newBotFormOpen = true; // New Bot Form collapsible state
+	let botWizardOpen = false; // Bot Wizard modal state
+	let newBotFormRef: NewBotForm; // Reference to NewBotForm for wizard results
 	let attachmentsOpen = true; // Attachments section collapsible state
 	let clearConvConfirmOpen = false; // Clear conversation confirmation modal
 	let closeChatConfirmOpen = false; // Close chat confirmation modal
@@ -1029,6 +1032,16 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 		}));
 		setUserItem('savedBots', JSON.stringify(serializable));
 		return savedBot;
+	}
+
+	// Handler for wizard-generated persona
+	function handleWizardGenerate(event: CustomEvent<{ name: string; instruction: string }>) {
+		const { name, instruction } = event.detail;
+		botWizardOpen = false;
+		// Apply to the NewBotForm
+		if (newBotFormRef) {
+			newBotFormRef.applyWizardResult(name, instruction);
+		}
 	}
 
 	async function addBotToConversation(bot: Bot) {
@@ -2232,6 +2245,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 					{#if newBotFormOpen}
 						<div class="mt-4">
 							<NewBotForm
+								bind:this={newBotFormRef}
 								on:save={async (e: CustomEvent<Bot>) => {
 									const saved = await saveBotConfig(e.detail);
 									if (saved) {
@@ -2239,6 +2253,7 @@ Response Length Mode: DEPTH (deep, comprehensive analysis).
 									}
 								}}
 								on:openSettings={() => (settingsOpen = true)}
+								on:openWizard={() => (botWizardOpen = true)}
 							/>
 						</div>
 					{/if}
@@ -2643,6 +2658,13 @@ active bots counts as 3 bot messages"
 <!-- Sign In Modal -->
 <SignInModal bind:open={signInOpen} />
 
+<!-- Bot Wizard Modal (rendered at page level to escape sidebar) -->
+<BotWizard 
+	isOpen={botWizardOpen} 
+	on:close={() => (botWizardOpen = false)}
+	on:generate={handleWizardGenerate}
+/>
+
 <!-- About Modal -->
 <AboutModal bind:isOpen={aboutOpen} on:close={() => (aboutOpen = false)} />
 
@@ -2949,6 +2971,7 @@ active bots counts as 3 bot messages"
 >
 	<div class="p-4">
 		<NewBotForm
+			bind:this={newBotFormRef}
 			on:save={async (e) => {
 				const saved = await saveBotConfig(e.detail);
 				if (saved) {
@@ -2957,6 +2980,7 @@ active bots counts as 3 bot messages"
 				closeMobilePanel();
 			}}
 			on:openSettings={() => { closeMobilePanel(); settingsOpen = true; }}
+			on:openWizard={() => (botWizardOpen = true)}
 		/>
 	</div>
 </SlidePanel>

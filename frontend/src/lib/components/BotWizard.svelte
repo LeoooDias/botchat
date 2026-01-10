@@ -476,9 +476,10 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if isOpen}
-	<!-- Modal Backdrop -->
+	<!-- Modal Backdrop - uses svelte:body portal pattern to escape any container -->
 	<div
-		class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+		class="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-0 sm:p-4"
+		style="position: fixed; top: 0; left: 0; right: 0; bottom: 0;"
 		on:click={handleBackdropClick}
 		on:keydown={() => {}}
 		role="dialog"
@@ -487,35 +488,35 @@
 		tabindex="-1"
 		transition:fade={{ duration: 200 }}
 	>
-		<!-- Modal Content -->
+		<!-- Modal Content - full screen on mobile, centered card on desktop -->
 		<div 
-			class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700"
+			class="bg-white dark:bg-gray-900 sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl h-full sm:h-auto sm:max-h-[90vh] flex flex-col overflow-hidden sm:border border-gray-200 dark:border-gray-700"
 			transition:scale={{ duration: 300, easing: backOut, start: 0.95 }}
 		>
 			<!-- Header -->
-			<div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-				<div class="flex items-center gap-3">
-					<div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-						<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+			<div class="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+				<div class="flex items-center gap-2 sm:gap-3">
+					<div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+						<svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
 						</svg>
 					</div>
-					<div>
-						<h2 id="wizard-title" class="text-xl font-bold text-gray-900 dark:text-white">Bot Wizard</h2>
-						<p class="text-sm text-gray-500 dark:text-gray-400">
+					<div class="min-w-0">
+						<h2 id="wizard-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">Bot Wizard</h2>
+						<p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
 							{#if currentStep === 'expertise'}
-								Step 1: Choose areas of expertise
+								Step 1: Choose expertise
 							{:else if currentStep === 'traits'}
-								Step 2: Select personality traits
+								Step 2: Select traits
 							{:else}
-								Step 3: Review and generate
+								Step 3: Review & generate
 							{/if}
 						</p>
 					</div>
 				</div>
 				<button
 					on:click={handleClose}
-					class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
+					class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition flex-shrink-0"
 					aria-label="Close"
 				>
 					<svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -524,33 +525,33 @@
 				</button>
 			</div>
 
-			<!-- Step Indicator -->
-			<div class="px-6 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-				<div class="flex items-center gap-2">
-					<div class="flex items-center gap-2">
-						<div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'expertise' ? 'bg-blue-600 text-white' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'}">1</div>
-						<span class="text-sm {currentStep === 'expertise' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Expertise</span>
+			<!-- Step Indicator - compact on mobile -->
+			<div class="px-4 sm:px-6 py-2 sm:py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+				<div class="flex items-center gap-1 sm:gap-2">
+					<div class="flex items-center gap-1 sm:gap-2">
+						<div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'expertise' ? 'bg-blue-600 text-white' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'}">1</div>
+						<span class="text-xs sm:text-sm hidden xs:inline {currentStep === 'expertise' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Expertise</span>
 					</div>
 					<div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
-					<div class="flex items-center gap-2">
-						<div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'traits' ? 'bg-blue-600 text-white' : currentStep === 'review' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">2</div>
-						<span class="text-sm {currentStep === 'traits' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Traits</span>
+					<div class="flex items-center gap-1 sm:gap-2">
+						<div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'traits' ? 'bg-blue-600 text-white' : currentStep === 'review' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">2</div>
+						<span class="text-xs sm:text-sm hidden xs:inline {currentStep === 'traits' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Traits</span>
 					</div>
 					<div class="flex-1 h-px bg-gray-300 dark:bg-gray-600"></div>
-					<div class="flex items-center gap-2">
-						<div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'review' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">3</div>
-						<span class="text-sm {currentStep === 'review' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Review</span>
+					<div class="flex items-center gap-1 sm:gap-2">
+						<div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs font-medium {currentStep === 'review' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">3</div>
+						<span class="text-xs sm:text-sm hidden xs:inline {currentStep === 'review' ? 'text-gray-900 dark:text-white font-medium' : 'text-gray-500 dark:text-gray-400'}">Review</span>
 					</div>
 				</div>
 			</div>
 
 			<!-- Content -->
-			<div class="flex-1 overflow-y-auto p-6">
+			<div class="flex-1 overflow-y-auto p-4 sm:p-6">
 				{#if currentStep === 'expertise'}
 					<!-- STEP 1: Expertise Tree -->
 					<div transition:fly={{ x: -20, duration: 200 }}>
 						<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-							Select areas where your advisor has world-class expertise. Check a category for broad knowledge, or expand to pick specific subfields.
+							Select areas where your bot has world-class expertise. Check a category for broad knowledge, or expand to pick specific subfields.
 						</p>
 						
 						<div class="space-y-1">
@@ -599,8 +600,8 @@
 									
 									<!-- Subclasses -->
 									{#if expandedCategories.has(category.id)}
-										<div class="px-3 py-2 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700" transition:slide={{ duration: 150 }}>
-											<div class="grid grid-cols-2 gap-1 pl-7">
+										<div class="px-2 sm:px-3 py-2 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700" transition:slide={{ duration: 150 }}>
+											<div class="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-4 sm:pl-7">
 												{#each category.subclasses as subclass (subclass.id)}
 													<button
 														on:click={() => toggleSubclassSelect(category.id, subclass.id)}
@@ -611,7 +612,7 @@
 																? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
 																: 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'}"
 													>
-														<div class="w-4 h-4 rounded border flex items-center justify-center {selectedSubclasses.has(subclass.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'}">
+														<div class="w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center {selectedSubclasses.has(subclass.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'}">
 															{#if selectedSubclasses.has(subclass.id)}
 																<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
 																	<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -707,7 +708,7 @@
 							</div>
 
 							{#key traitAnimationKey}
-								<div class="grid grid-cols-4 gap-2">
+								<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
 									{#each traitWords as word, i (word + '-' + i)}
 										<button
 											on:click={() => toggleTrait(word)}
@@ -891,21 +892,22 @@
 			</div>
 
 			<!-- Footer -->
-			<div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-				<div class="flex items-center justify-between">
+			<div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+				<div class="flex items-center justify-between gap-3">
 					{#if currentStep === 'expertise'}
-						<p class="text-sm text-gray-500 dark:text-gray-400">
+						<p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
 							{#if hasExpertise}
-								{selectedCategories.size + selectedSubclasses.size} area{selectedCategories.size + selectedSubclasses.size !== 1 ? 's' : ''} selected
+								{selectedCategories.size + selectedSubclasses.size}{customExpertise.trim() ? '+' : ''} selected
 							{:else}
-								Select expertise or skip to traits
+								Skip or select expertise
 							{/if}
 						</p>
 						<button
 							on:click={goToTraits}
-							class="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/25 flex items-center gap-2"
+							class="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/25 flex items-center gap-2 text-sm sm:text-base flex-shrink-0"
 						>
-							{hasExpertise ? 'Next: Traits' : 'Skip to Traits'}
+							<span class="hidden sm:inline">{hasExpertise ? 'Next: Traits' : 'Skip to Traits'}</span>
+							<span class="sm:hidden">{hasExpertise ? 'Next' : 'Skip'}</span>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
 							</svg>
@@ -913,15 +915,16 @@
 					{:else if currentStep === 'traits'}
 						<button
 							on:click={goBack}
-							class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"
+							class="px-3 sm:px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition text-sm sm:text-base"
 						>
 							← Back
 						</button>
 						<button
 							on:click={goToReview}
-							class="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/25 flex items-center gap-2"
+							class="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/25 flex items-center gap-2 text-sm sm:text-base flex-shrink-0"
 						>
-							{totalTraits > 0 ? 'Next: Review' : 'Skip to Review'}
+							<span class="hidden sm:inline">{totalTraits > 0 ? 'Next: Review' : 'Skip to Review'}</span>
+							<span class="sm:hidden">{totalTraits > 0 ? 'Next' : 'Skip'}</span>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
 							</svg>
@@ -929,26 +932,27 @@
 					{:else if currentStep === 'review' && !generatedInstruction}
 						<button
 							on:click={goBack}
-							class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"
+							class="px-3 sm:px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition text-sm sm:text-base"
 						>
 							← Back
 						</button>
 						<button
 							on:click={generatePersona}
 							disabled={!canGenerate || isGenerating}
-							class="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500 enabled:hover:from-blue-600 enabled:hover:to-blue-700 enabled:shadow-lg enabled:shadow-blue-500/25 flex items-center gap-2"
+							class="px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500 enabled:hover:from-blue-600 enabled:hover:to-blue-700 enabled:shadow-lg enabled:shadow-blue-500/25 flex items-center gap-2 text-sm sm:text-base flex-shrink-0"
 						>
 							{#if isGenerating}
 								<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
 									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 								</svg>
-								Generating...
+								<span class="hidden sm:inline">Generating...</span>
 							{:else}
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
 								</svg>
-								Generate Persona
+								<span class="hidden sm:inline">Generate Persona</span>
+								<span class="sm:hidden">Generate</span>
 							{/if}
 						</button>
 					{:else}

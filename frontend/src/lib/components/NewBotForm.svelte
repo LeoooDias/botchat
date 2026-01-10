@@ -2,7 +2,6 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { getMaxOutput } from '$lib/modelLimits';
 	import { getUserItem } from '$lib/utils/userStorage';
-	import BotWizard from './BotWizard.svelte';
 
 	interface Bot {
 		id: string;
@@ -21,7 +20,7 @@
 		name: string;
 	}
 
-	const dispatch = createEventDispatcher<{ save: Bot; openSettings: void }>();
+	const dispatch = createEventDispatcher<{ save: Bot; openSettings: void; openWizard: void }>();
 
 	// All available providers with their models
 	// Platform keys are now the default - all providers always available
@@ -51,7 +50,6 @@
 	let systemInstructionText = '';
 	let selectedCategory = '';
 	let categories: Category[] = [];
-	let showPersonaWizard = false;
 
 	onMount(() => {
 		// Load categories from user-namespaced storage
@@ -150,11 +148,10 @@
 		loadCategories();
 	}
 
-	function handlePersonaGenerated(event: CustomEvent<{ name: string; instruction: string }>) {
-		const { name, instruction } = event.detail;
+	// Called by parent when wizard generates a persona
+	export function applyWizardResult(name: string, instruction: string) {
 		botName = name;
 		systemInstructionText = instruction;
-		showPersonaWizard = false;
 	}
 </script>
 
@@ -210,7 +207,7 @@
 				<!-- Persona Wizard Button -->
 				<button
 					type="button"
-					on:click={() => showPersonaWizard = true}
+					on:click={() => dispatch('openWizard')}
 					class="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
 					title="Use AI to create a persona"
 				>
@@ -361,10 +358,3 @@
 		</button>
 	</div>
 </div>
-
-<!-- Bot Wizard Modal -->
-<BotWizard 
-	isOpen={showPersonaWizard} 
-	on:close={() => showPersonaWizard = false}
-	on:generate={handlePersonaGenerated}
-/>
