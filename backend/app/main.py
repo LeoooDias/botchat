@@ -352,7 +352,7 @@ class VerifyKeyRequest(BaseModel):
     api_key: str
 
 
-# Persona Wizard Models
+# Bot Wizard Models
 class WizardWordsRequest(BaseModel):
     """Request for generating persona trait words."""
     selected_words: List[str] = []  # Previously selected words to inform new suggestions
@@ -364,11 +364,20 @@ class WizardWordsResponse(BaseModel):
     words: List[str]  # 16 words for the grid
 
 
+class ExpertiseSubclass(BaseModel):
+    """A specific subclass of expertise."""
+    category: str  # Parent category name
+    subclass: str  # Subclass name
+
+
 class WizardGenerateRequest(BaseModel):
-    """Request to generate a full persona from selected traits."""
+    """Request to generate a full persona from selected traits and expertise."""
     name: str  # Bot name (required)
-    selected_words: List[str]  # All selected trait words
+    selected_words: List[str] = []  # Selected trait words
     custom_words: List[str] = []  # User-added custom words
+    expertise_categories: List[str] = []  # Full categories (world-class in entire domain)
+    expertise_subclasses: List[ExpertiseSubclass] = []  # Specific subclasses
+    custom_expertise: Optional[str] = None  # User-typed custom expertise description
 
 
 class WizardGenerateResponse(BaseModel):
@@ -1580,29 +1589,36 @@ Output format: Return ONLY a JSON array of exactly 16 strings, nothing else."""
 
 WIZARD_GENERATE_SYSTEM = """You are an expert at crafting detailed AI persona instructions for a multi-persona group chat application. You create rich, consistent personalities for AI advisors that feel authentic, useful, and behave correctly in group discussions.
 
-Your task: Generate a complete system instruction for an AI persona based on the user's selected trait words and chosen name.
+Your task: Generate a complete system instruction for an AI persona based on the user's provided expertise areas and personality traits.
+
+EXPERTISE vs TRAITS:
+- EXPERTISE defines what the persona knows at a world-class, guru level. When full categories are specified, the persona has comprehensive mastery of that entire domain. When specific subclasses are specified, the persona has deep specialization in those areas.
+- TRAITS define HOW the persona communicates, thinks, and behaves - their personality and style.
 
 The instruction MUST follow this exact structure with all sections:
 
 ---
 
 1. OPENING IDENTITY (required):
-"You are [Name], a [role/expertise description woven from the traits]."
-"You are participating in a multi-persona group discussion. You contribute [your unique perspective] unless explicitly asked to evaluate or summarize another participant's comments."
+"You are [Name], a world-class authority on [expertise areas synthesized naturally]."
+OR if no expertise: "You are [Name], a [role derived from traits]."
+
+Then add:
+"You are participating in a multi-persona group discussion. You contribute [your unique perspective based on expertise/traits] unless explicitly asked to evaluate or summarize another participant's comments."
 
 2. CORE WORLDVIEW (required):
-A section titled "CORE WORLDVIEW" with 2-4 sentences capturing the persona's fundamental beliefs, philosophy, and approach to problems.
+A section titled "CORE WORLDVIEW" with 2-4 sentences capturing the persona's fundamental beliefs, philosophy, and approach to problems. This should reflect both their expertise domain and personality traits.
 
 3. PRIMARY FOCUS AREAS (required):
-A section titled "PRIMARY FOCUS AREAS" with a bullet list of 4-6 specific areas of expertise or concern.
+A section titled "PRIMARY FOCUS AREAS" with a bullet list of 4-6 specific areas. For personas with expertise, these should be concrete areas within their domain(s). For traits-only personas, derive focus areas from their personality.
 
 4. BEHAVIORAL CONSTRAINTS (required):
 A section titled "BEHAVIORAL CONSTRAINTS" with two subsections:
-"You will:" - 3-4 positive behaviors
-"You will not:" - 3-4 things to avoid
+"You will:" - 3-4 positive behaviors derived from traits
+"You will not:" - 3-4 things to avoid based on the persona's character
 
-5. DISCOURSE & IDENTITY RULES (CRITICAL) (required - use this exact text):
-A section titled "DISCOURSE & IDENTITY RULES (CRITICAL)" containing:
+5. DISCOURSE & IDENTITY RULES (CRITICAL) (required - copy this EXACTLY):
+A section titled "DISCOURSE & IDENTITY RULES (CRITICAL)" containing exactly this text:
 "These rules govern how you participate in group conversation:
 • When answering a general question posed to the group, speak only for yourself, in the first person ("I think…", "My view is…").
 • When asked about another participant's response, analyze their ideas, referring to them in the third person by name.
@@ -1611,12 +1627,12 @@ A section titled "DISCOURSE & IDENTITY RULES (CRITICAL)" containing:
 • Never speak as another participant, merge identities, or defensively assert who you are."
 
 6. DEFAULT RESPONSE SHAPE (required):
-A section titled "DEFAULT RESPONSE SHAPE" with a numbered list of 4 elements describing how the persona structures typical responses.
+A section titled "DEFAULT RESPONSE SHAPE" with a numbered list of 4 elements describing how the persona structures typical responses. This should reflect their expertise domain and communication style.
 
 7. TONE ANCHORS (required):
-A section titled "TONE ANCHORS" with 3-5 adjectives or short phrases capturing communication style.
+A section titled "TONE ANCHORS" with 3-5 adjectives or short phrases capturing communication style derived from the traits.
 
-8. SELF-REFERENCE OVERRIDE (required - use this exact text):
+8. SELF-REFERENCE OVERRIDE (required - copy this EXACTLY):
 "Self-Reference Override (Critical):
 If a question is addressed to the group (e.g., "what do you all think of X's response"), and you are X, you must respond in the first person, treating the question as an invitation to add, clarify, or extend your view — not to analyze yourself as a third party.
 In such cases, do not refer to yourself by name. Speak as "I"."
@@ -1625,11 +1641,12 @@ In such cases, do not refer to yourself by name. Speak as "I"."
 
 CRITICAL REQUIREMENTS:
 - Include ALL sections above - do not skip any
-- Use clear section headers with formatting (bold or caps)
-- The DISCOURSE & IDENTITY RULES and SELF-REFERENCE OVERRIDE sections are mandatory for group chat functionality
-- Weave the selected traits naturally into the identity, worldview, focus areas, and constraints
-- Make the persona feel genuine and distinct, not generic
-- Total length should be 600-900 words to ensure completeness"""
+- Use clear section headers (e.g., "CORE WORLDVIEW", "PRIMARY FOCUS AREAS")
+- The DISCOURSE & IDENTITY RULES and SELF-REFERENCE OVERRIDE sections must be copied EXACTLY as shown
+- For world-class expertise: convey genuine authority and depth, not superficial knowledge
+- Weave traits naturally into worldview, constraints, and tone
+- Make the persona feel like a real expert with distinct personality
+- Total length should be 600-1000 words to ensure completeness"""
 
 
 @app.post("/wizard/words", response_model=WizardWordsResponse)
@@ -1706,7 +1723,7 @@ Remember: Return ONLY a JSON array of 16 strings."""
 
 @app.post("/wizard/generate", response_model=WizardGenerateResponse)
 async def wizard_generate_persona(req: WizardGenerateRequest):
-    """Generate a full persona instruction from selected traits.
+    """Generate a full persona instruction from expertise and traits.
     
     Uses Gemini Flash for quality at reasonable cost (~$0.001 per call).
     No authentication required - output is returned to user, not stored.
@@ -1714,26 +1731,53 @@ async def wizard_generate_persona(req: WizardGenerateRequest):
     if not req.name or not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
     
-    if len(req.selected_words) + len(req.custom_words) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 trait words required")
+    # Allow expertise-only, traits-only, or both
+    has_expertise = len(req.expertise_categories) > 0 or len(req.expertise_subclasses) > 0 or bool(req.custom_expertise)
+    has_traits = len(req.selected_words) + len(req.custom_words) > 0
+    
+    if not has_expertise and not has_traits:
+        raise HTTPException(status_code=400, detail="Select at least some expertise or traits")
     
     try:
         provider = NativeGeminiProvider(api_key=None)  # Platform mode
         
+        # Build expertise description
+        expertise_parts = []
+        if req.expertise_categories:
+            for cat in req.expertise_categories:
+                expertise_parts.append(f"world-class, comprehensive expertise in {cat} (the entire domain)")
+        if req.expertise_subclasses:
+            subclass_names = [s.subclass for s in req.expertise_subclasses]
+            if len(subclass_names) == 1:
+                expertise_parts.append(f"deep specialization in {subclass_names[0]}")
+            else:
+                expertise_parts.append(f"deep specialization in {', '.join(subclass_names[:-1])} and {subclass_names[-1]}")
+        if req.custom_expertise:
+            expertise_parts.append(f"custom expertise: {req.custom_expertise}")
+        
+        expertise_text = "; ".join(expertise_parts) if expertise_parts else "No specific expertise (personality-focused advisor)"
+        
+        # Build traits description
         all_traits = req.selected_words + req.custom_words
+        traits_text = ", ".join(all_traits) if all_traits else "No specific traits selected"
         
         user_prompt = f"""Create a persona instruction for an AI advisor with:
 
 Name: {req.name.strip()}
 
-Selected traits: {', '.join(all_traits)}
+EXPERTISE (what they know at guru level):
+{expertise_text}
+
+PERSONALITY TRAITS (how they communicate and behave):
+{traits_text}
 
 Generate a complete, well-structured system instruction following the format I described.
-Make {req.name} feel like a real, distinct personality - not a generic assistant."""
+Make {req.name} feel like a genuine world-class expert with a distinct personality - not a generic assistant.
+The expertise should convey real authority and depth. The traits should shape how they engage."""
         
         response_text = ""
         for chunk in provider.stream(
-            model="gemini-2.5-flash",  # Slightly better model for quality output
+            model="gemini-2.5-flash",  # Quality model for persona generation
             message=user_prompt,
             system_instruction=WIZARD_GENERATE_SYSTEM,
             max_tokens=4000,

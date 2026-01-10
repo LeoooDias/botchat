@@ -2,7 +2,7 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { getMaxOutput } from '$lib/modelLimits';
 	import { getUserItem } from '$lib/utils/userStorage';
-	import PersonaWizard from './PersonaWizard.svelte';
+	import BotWizard from './BotWizard.svelte';
 
 	interface Bot {
 		id: string;
@@ -362,8 +362,8 @@
 	</div>
 </div>
 
-<!-- Persona Wizard Modal -->
-<PersonaWizard 
+<!-- Bot Wizard Modal -->
+<BotWizard 
 	isOpen={showPersonaWizard} 
 	on:close={() => showPersonaWizard = false}
 	on:generate={handlePersonaGenerated}
